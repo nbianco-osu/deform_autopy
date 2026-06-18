@@ -152,3 +152,4 @@ This code wraps the DEFORM SFTC Python API to automate DEFORM simulations. The m
   - `optimizers/bayesian.py` for expected-improvement candidate proposal.
   - `README_OPTIMIZATION.md` explaining the workflow.
 - Added `doe_runner.py` as a DOE orchestrator. It reads candidate CSVs, writes one action CSV/config pair per candidate, logs planned runs to the manifest, and can optionally execute `run_deform_hits_v3_improved.py` with `--execute`.
+- Added `run_initial_doe.py`, a Spyder-friendly one-file launcher that generates initial DOE candidates, creates a 5-hit single-die DOE template config, prepares generated action/config files, logs the manifest, and optionally executes runs.

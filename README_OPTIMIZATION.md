@@ -48,6 +48,11 @@ learning approaches.
   - Logs planned runs to the manifest.
   - Optionally executes `run_deform_hits_v3_improved.py`.
 
+- `run_initial_doe.py`
+  - Spyder-friendly one-file launcher for the first DOE.
+  - Generates candidates, creates a DOE template config, prepares action/config
+    files, and optionally launches runs.
+
 ## Recommended Study Loop
 
 ### 1. Define Input Bounds
@@ -64,6 +69,24 @@ bounds = {
 ```
 
 ### 2. Generate Initial DOE Candidates
+
+The simplest Spyder workflow is to open `run_initial_doe.py`, edit the user
+settings at the top, and run it. Keep `EXECUTE_RUNS = False` for the first pass
+so it only creates candidate files:
+
+```python
+EXECUTE_RUNS = False
+```
+
+After inspecting generated action/config files, set:
+
+```python
+EXECUTE_RUNS = True
+```
+
+and run the file again.
+
+The lower-level manual candidate generation workflow is:
 
 ```python
 from optimizers.doe import latin_hypercube, save_candidates
