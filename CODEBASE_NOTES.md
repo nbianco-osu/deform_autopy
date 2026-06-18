@@ -151,3 +151,4 @@ This code wraps the DEFORM SFTC Python API to automate DEFORM simulations. The m
   - `optimizers/doe.py` for Latin hypercube and grid DOE candidates.
   - `optimizers/bayesian.py` for expected-improvement candidate proposal.
   - `README_OPTIMIZATION.md` explaining the workflow.
+- Added `doe_runner.py` as a DOE orchestrator. It reads candidate CSVs, writes one action CSV/config pair per candidate, logs planned runs to the manifest, and can optionally execute `run_deform_hits_v3_improved.py` with `--execute`.

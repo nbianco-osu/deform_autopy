@@ -43,6 +43,11 @@ learning approaches.
 - `optimizers/bayesian.py`
   - Proposes new candidates using expected improvement.
 
+- `doe_runner.py`
+  - Turns candidate rows into DEFORM action CSVs and runner configs.
+  - Logs planned runs to the manifest.
+  - Optionally executes `run_deform_hits_v3_improved.py`.
+
 ## Recommended Study Loop
 
 ### 1. Define Input Bounds
@@ -68,6 +73,43 @@ save_candidates(candidates, "optimization/candidates_initial.csv")
 ```
 
 These candidate rows can be converted into action CSVs or run configs.
+
+### 2b. Turn DOE Candidates Into DEFORM Runs
+
+Use `doe_runner.py` to create one action CSV and one config JSON per candidate.
+By default it performs a dry run and does not launch DEFORM:
+
+```powershell
+python doe_runner.py `
+  --candidates optimization/candidates_initial.csv `
+  --template-config configs/run_deform_hits_v3_config.example.json `
+  --output-root optimization `
+  --study-name grain_bending_study_001 `
+  --manifest optimization/manifest.csv `
+  --runner-script run_deform_hits_v3_improved.py
+```
+
+When the generated inputs look correct, add `--execute`:
+
+```powershell
+python doe_runner.py `
+  --candidates optimization/candidates_initial.csv `
+  --template-config configs/run_deform_hits_v3_config.example.json `
+  --output-root optimization `
+  --study-name grain_bending_study_001 `
+  --manifest optimization/manifest.csv `
+  --runner-script run_deform_hits_v3_improved.py `
+  --execute
+```
+
+Candidate columns that match action CSV columns, such as `depth_in` or
+`speed_in/s`, are written into the generated action CSV. Candidate columns that
+match config keys, such as `height`, `time_step`, or `run_number`, are written
+into the generated config.
+
+The default `--apply-mode all_rows` applies candidate values to every row in
+the action CSV. Use `--apply-mode hit_row` with a `hit` column in the candidates
+CSV to modify only one action row.
 
 ### 3. Log Runs to a Manifest
 
