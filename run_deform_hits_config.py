@@ -500,9 +500,10 @@ def convert_load_stroke_text_to_csv(text_path, csv_path):
     """Convert DEFORM load-stroke text output to a simple comma CSV.
 
     `defPost.export.loadStrokeTime` writes the same style of text file as
-    DEFORM text post. The exact header can vary by model/version, so this
-    converter keeps the parsing intentionally tolerant.
+    DEFORM text post. The DOE workflow expects these columns:
+    Step, Time, S, V, Fx, Fy, Fz.
     """
+    header = ["Step", "Time", "S", "V", "Fx", "Fy", "Fz"]
     rows = []
     with open(text_path, "r") as file:
         for line in file:
@@ -521,10 +522,8 @@ def convert_load_stroke_text_to_csv(text_path, csv_path):
 
     first_row_is_header = any(not is_number_token(token) for token in rows[0])
     if first_row_is_header:
-        header = make_unique_columns(rows[0])
         data_rows = rows[1:]
     else:
-        header = [f"column_{idx}" for idx in range(1, len(rows[0]) + 1)]
         data_rows = rows
 
     width = len(header)

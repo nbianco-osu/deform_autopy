@@ -10,6 +10,8 @@ This file performs the first optimization workflow end-to-end:
 5. Optionally execute each generated config with `run_deform_hits_config.py`.
 6. Optionally process completed runs into `dataset.csv`.
 7. Optionally train a surrogate and write `candidates_next.csv`.
+8. Optionally prepare or execute one next-candidate batch.
+9. Optionally refresh plots and the HTML report.
 
 Recommended first use:
 - Set EXECUTE_RUNS = False.
@@ -25,6 +27,7 @@ from pathlib import Path
 from doe_runner import orchestrate_doe_runs
 from optimizers.doe import latin_hypercube, save_candidates
 from process_doe_results import process_doe_results, train_and_propose_next
+from visualize_doe_results import visualize_doe_results
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +60,20 @@ PROCESS_RESULTS = False
 # This requires scikit-learn in the Python environment and enough completed runs
 # with objective values.
 PROPOSE_NEXT_CANDIDATES = False
+
+# Prepare and optionally execute the candidate batch proposed from the first DOE.
+# This is intentionally one finite batch, not an infinite optimization loop.
+RUN_NEXT_CANDIDATES = False
+EXECUTE_NEXT_CANDIDATES = False
+
+# Refresh `report/index.html` and plot images for the current study.
+# This can be True even when PROCESS_RESULTS is False if dataset.csv already exists.
+MAKE_REPORT = False
+
+# Stop controls for the proposed-candidate batch. The current launcher only runs
+# one next round, and this guard prevents accidental use as an open-ended loop.
+NEXT_ROUND_NUMBER = 2
+MAX_ROUND_NUMBER = 2
 
 # How candidate values are applied to the action file:
 # - "all_rows": apply each candidate value to every hit row.
@@ -114,6 +131,9 @@ MANIFEST_CSV = OPTIMIZATION_ROOT / STUDY_NAME / "manifest.csv"
 DOE_TEMPLATE_CONFIG = OPTIMIZATION_ROOT / STUDY_NAME / "doe_template_config.json"
 DATASET_CSV = OPTIMIZATION_ROOT / STUDY_NAME / "dataset.csv"
 NEXT_CANDIDATES_CSV = OPTIMIZATION_ROOT / STUDY_NAME / "candidates_next.csv"
+REPORT_DIR = OPTIMIZATION_ROOT / STUDY_NAME / "report"
+NEXT_STUDY_NAME = f"{STUDY_NAME}_round_{NEXT_ROUND_NUMBER:02d}"
+NEXT_MANIFEST_CSV = OPTIMIZATION_ROOT / NEXT_STUDY_NAME / "manifest.csv"
 
 
 def load_json(path):
@@ -197,6 +217,8 @@ def run_initial_doe():
 
     processing_result = None
     proposal_result = None
+    report_result = None
+    next_planned_runs = []
 
     if PROCESS_RESULTS:
         print("")
@@ -237,10 +259,62 @@ def run_initial_doe():
         print("")
         print("Result processing skipped. Set PROCESS_RESULTS = True after runs complete.")
 
+    if RUN_NEXT_CANDIDATES:
+        print("")
+        print("Preparing proposed next-candidate batch...")
+
+        if NEXT_ROUND_NUMBER > MAX_ROUND_NUMBER:
+            print(
+                f"  Skipped: NEXT_ROUND_NUMBER={NEXT_ROUND_NUMBER} is greater "
+                f"than MAX_ROUND_NUMBER={MAX_ROUND_NUMBER}."
+            )
+        elif not NEXT_CANDIDATES_CSV.exists():
+            print(f"  Skipped: next-candidates CSV was not found: {NEXT_CANDIDATES_CSV}")
+        else:
+            next_planned_runs = orchestrate_doe_runs(
+                candidates_csv=NEXT_CANDIDATES_CSV,
+                template_config_path=DOE_TEMPLATE_CONFIG,
+                output_root=OPTIMIZATION_ROOT,
+                study_name=NEXT_STUDY_NAME,
+                manifest_path=NEXT_MANIFEST_CSV,
+                runner_script=RUNNER_SCRIPT,
+                apply_mode=APPLY_MODE,
+                execute=EXECUTE_NEXT_CANDIDATES,
+                config_overrides=DOE_CONFIG_OVERRIDES,
+            )
+            print(f"  Prepared {len(next_planned_runs)} proposed-candidate run(s).")
+            print(f"  Next-round manifest: {NEXT_MANIFEST_CSV}")
+            print(f"  Next-round runs folder: {OPTIMIZATION_ROOT / NEXT_STUDY_NAME / 'runs'}")
+
+            if not EXECUTE_NEXT_CANDIDATES:
+                print("  Dry run only. Set EXECUTE_NEXT_CANDIDATES = True to launch this batch.")
+
+    if MAKE_REPORT:
+        print("")
+        print("Refreshing DOE visualization report...")
+        try:
+            report_result = visualize_doe_results(
+                study_root=OPTIMIZATION_ROOT / STUDY_NAME,
+                dataset_path=DATASET_CSV,
+                manifest_path=MANIFEST_CSV,
+                candidates_path=NEXT_CANDIDATES_CSV,
+                surrogate_report_path=OPTIMIZATION_ROOT / STUDY_NAME / "surrogate_report.json",
+                output_dir=REPORT_DIR,
+            )
+            print(f"  Report: {report_result['report_path']}")
+            print(f"  Plots generated: {report_result['plot_count']}")
+            if report_result.get("plot_warning"):
+                print(f"  Plot warning: {report_result['plot_warning']}")
+        except Exception as exc:
+            print("  Report generation failed.")
+            print(f"  Reason: {exc}")
+
     return {
         "planned_runs": planned_runs,
         "processing_result": processing_result,
         "proposal_result": proposal_result,
+        "report_result": report_result,
+        "next_planned_runs": next_planned_runs,
     }
 
 
