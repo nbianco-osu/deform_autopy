@@ -116,6 +116,25 @@ PROPOSE_NEXT_CANDIDATES = True
 This writes `dataset.csv`, `surrogate_report.json`, and `candidates_next.csv`
 under the study folder.
 
+To prepare the proposed candidate batch from `candidates_next.csv`:
+
+```python
+RUN_NEXT_CANDIDATES = True
+EXECUTE_NEXT_CANDIDATES = False
+```
+
+After inspecting the generated next-round configs/actions:
+
+```python
+RUN_NEXT_CANDIDATES = True
+EXECUTE_NEXT_CANDIDATES = True
+```
+
+The launcher is not an infinite loop. It stops after one proposed-candidate
+batch. `NEXT_ROUND_NUMBER` and `MAX_ROUND_NUMBER` are guardrails so the script
+cannot accidentally continue into additional rounds unless you explicitly edit
+those settings.
+
 The lower-level manual candidate generation workflow is:
 
 ```python
