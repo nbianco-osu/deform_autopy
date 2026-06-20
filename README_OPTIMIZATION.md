@@ -11,7 +11,7 @@ it is not the best first step. A better first workflow is:
 
 1. Run a designed set of simulations.
 2. Save inputs, settings, and post-processed outputs.
-3. Compute metrics such as grain-size error, bending, load, and runtime.
+3. Compute metrics such as grain-size error, max damage, load, and runtime.
 4. Train a surrogate model.
 5. Use Bayesian optimization to propose the next few DEFORM runs.
 
@@ -26,7 +26,7 @@ learning approaches.
 - `metrics.py`
   - Converts post-processing files into numeric metrics.
   - Supports microstructure summaries, load-stroke summaries, coordinate
-    centering errors, and centerline bending from point data.
+    centering errors, and damage summaries.
 
 - `dataset_builder.py`
   - Joins manifest rows, metadata, and metrics into one training table.
@@ -51,7 +51,14 @@ learning approaches.
 - `run_initial_doe.py`
   - Spyder-friendly one-file launcher for the first DOE.
   - Generates candidates, creates a DOE template config, prepares action/config
-    files, and optionally launches runs.
+    files, optionally launches runs, processes results, builds the dataset, and
+    can propose the next Bayesian candidate batch.
+
+- `process_doe_results.py`
+  - Processes completed DOE runs from the manifest.
+  - Saves initial pre-run grain state, post-hit microstructure CSVs, max damage
+    summaries, and discovered result CSV paths.
+  - Updates the manifest and builds `dataset.csv`.
 
 ## Recommended Study Loop
 
@@ -75,7 +82,9 @@ settings at the top, and run it. Keep `EXECUTE_RUNS = False` for the first pass
 so it only creates candidate files:
 
 ```python
+PREPARE_RUNS = True
 EXECUTE_RUNS = False
+PROCESS_RESULTS = False
 ```
 
 After inspecting generated action/config files, set:
@@ -85,6 +94,27 @@ EXECUTE_RUNS = True
 ```
 
 and run the file again.
+
+After DEFORM finishes, process the completed runs into a dataset:
+
+```python
+PREPARE_RUNS = False
+EXECUTE_RUNS = False
+PROCESS_RESULTS = True
+PROPOSE_NEXT_CANDIDATES = False
+```
+
+When the dataset has enough completed rows and `scikit-learn` is available, ask
+the same launcher to propose the next candidates:
+
+```python
+PREPARE_RUNS = False
+PROCESS_RESULTS = True
+PROPOSE_NEXT_CANDIDATES = True
+```
+
+This writes `dataset.csv`, `surrogate_report.json`, and `candidates_next.csv`
+under the study folder.
 
 The lower-level manual candidate generation workflow is:
 
@@ -107,7 +137,7 @@ python doe_runner.py `
   --candidates optimization/candidates_initial.csv `
   --template-config configs/run_deform_hits_v3_config.example.json `
   --output-root optimization `
-  --study-name grain_bending_study_001 `
+  --study-name grain_damage_study_001 `
   --manifest optimization/manifest.csv `
   --runner-script run_deform_hits_v3_improved.py
 ```
@@ -119,7 +149,7 @@ python doe_runner.py `
   --candidates optimization/candidates_initial.csv `
   --template-config configs/run_deform_hits_v3_config.example.json `
   --output-root optimization `
-  --study-name grain_bending_study_001 `
+  --study-name grain_damage_study_001 `
   --manifest optimization/manifest.csv `
   --runner-script run_deform_hits_v3_improved.py `
   --execute
@@ -142,7 +172,7 @@ from run_manifest import append_manifest_record
 append_manifest_record(
     "optimization/manifest.csv",
     {
-        "study_name": "grain_bending_study_001",
+        "study_name": "grain_damage_study_001",
         "run_name": "af_tensile_test_001",
         "run_dir": r"C:\path\to\runs\af_tensile_test_001",
         "status": "completed",
@@ -160,25 +190,34 @@ append_manifest_record(
 
 ### 4. Compute Metrics and Build Dataset
 
-If the manifest includes columns such as `microstructure_csv`,
-`load_stroke_csv`, or `coordinate_csv`, `dataset_builder.py` can merge those
-metrics automatically.
+Use `process_doe_results.py`, or set `PROCESS_RESULTS = True` in
+`run_initial_doe.py`, to update the manifest and build the dataset. The
+processor captures:
+
+- `initial_microstructure_csv`
+- `microstructure_csv`
+- `damage_csv`
+- `coordinate_csv`
+- `load_stroke_csv`
+
+`dataset_builder.py` merges those paths into metrics automatically.
 
 ```python
-from dataset_builder import build_dataset_from_manifest
+from process_doe_results import process_doe_results
 
-dataset = build_dataset_from_manifest(
+process_doe_results(
     manifest_path="optimization/manifest.csv",
-    output_csv_path="optimization/dataset.csv",
+    dataset_path="optimization/dataset.csv",
     objective_weights={
-        "grain_mean_um": 1.0,
+        "damage_max": 100.0,
+        "grain_std_um": 1.0,
         "top_die_center_distance": 10.0,
     },
 )
 ```
 
-For better objectives, add explicit terms such as grain-size error, bending
-error, maximum load penalty, and runtime penalty.
+For better objectives, add explicit terms such as grain-size error, maximum
+damage, maximum load penalty, and runtime penalty.
 
 ### 5. Train a Surrogate
 
@@ -219,7 +258,7 @@ Start with a scalar objective like:
 objective =
     grain_size_error_weight * abs(mean_grain_size - target_grain_size)
   + grain_std_weight * grain_size_std
-  + bending_weight * centerline_max_deviation
+  + damage_weight * damage_max
   + load_weight * load_limit_penalty
   + runtime_weight * runtime_minutes
 ```
@@ -229,7 +268,13 @@ That lets you later change priorities without rerunning DEFORM.
 
 ## Next Integration Step
 
-The next practical step is to have `run_deform_hits_v3_improved.py` write a run
-manifest row and save coordinate logs during hit 0 and after each hit. Once
-microstructure and load-stroke CSVs are consistently produced, the dataset
-builder can assemble training rows automatically.
+The result-processing loop is now available through `process_doe_results.py`
+and `run_initial_doe.py`. The remaining practical upgrades are:
+
+- Confirm the exported coordinate logs, load-stroke CSVs, and final/post-hit
+  key files are populated as expected after the first lab-computer run.
+- Use `doe_runner.py`'s default skip-existing behavior when rerunning the
+  launcher. Pass `--allow-duplicate-manifest-records` only when duplicate
+  records are intentional.
+- Tune `OBJECTIVE_WEIGHTS` after checking real dataset units from the first
+  completed DOE.

@@ -72,6 +72,34 @@ def summarize_load_stroke(load_stroke_csv):
     return result
 
 
+def summarize_damage(damage_csv):
+    """Summarize damage values exported by post-processing.
+
+    The processor writes a small CSV with `damage_min` and `damage_max` when it
+    can read DEFORM object info from a DB. This function is also tolerant of
+    wider CSV exports and will use any numeric column containing "damage".
+    """
+    df = pd.read_csv(damage_csv)
+    result = {"damage_rows": int(len(df))}
+    damage_columns = [column for column in df.columns if "damage" in column.lower()]
+
+    all_values = []
+    for column in damage_columns:
+        values = _as_array(df[column])
+        if not len(values):
+            continue
+        safe_name = column.lower().replace(" ", "_")
+        result[f"{safe_name}_min"] = float(np.min(values))
+        result[f"{safe_name}_max"] = float(np.max(values))
+        all_values.extend(values.tolist())
+
+    if all_values:
+        result["damage_min"] = float(np.min(all_values))
+        result["damage_max"] = float(np.max(all_values))
+
+    return result
+
+
 def summarize_coordinates(coordinate_csv):
     """Compute centering errors from saved object coordinate CSV.
 
@@ -141,13 +169,21 @@ def weighted_objective(metrics, weights, minimize=True):
 
 
 def collect_metrics_from_files(
+    initial_microstructure_csv=None,
     microstructure_csv=None,
     load_stroke_csv=None,
     coordinate_csv=None,
     centerline_csv=None,
+    damage_csv=None,
 ):
     """Collect all available metrics from optional post-processing files."""
     metrics = {}
+    if initial_microstructure_csv and Path(initial_microstructure_csv).exists():
+        initial_metrics = summarize_microstructure(initial_microstructure_csv)
+        metrics.update({
+            f"initial_state_{key}": value
+            for key, value in initial_metrics.items()
+        })
     if microstructure_csv and Path(microstructure_csv).exists():
         metrics.update(summarize_microstructure(microstructure_csv))
     if load_stroke_csv and Path(load_stroke_csv).exists():
@@ -156,4 +192,6 @@ def collect_metrics_from_files(
         metrics.update(summarize_coordinates(coordinate_csv))
     if centerline_csv and Path(centerline_csv).exists():
         metrics.update(centerline_bending_metric(centerline_csv))
+    if damage_csv and Path(damage_csv).exists():
+        metrics.update(summarize_damage(damage_csv))
     return metrics

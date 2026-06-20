@@ -9,6 +9,8 @@ calls themselves.
 
 from deformModel import defModel
 from enumPosition import PositionType
+import csv
+from pathlib import Path
 
 
 def position_dies_before_hits(
@@ -85,3 +87,55 @@ def position_dies_before_hits(
         PositionType.Offset,
         f"offset=(0,0,-{height}), upStroke=false",
     )
+
+
+def get_object_coordinates(object_name):
+    """Return min, max, and center coordinates for one DEFORM object.
+
+    This uses the coordinate accessors added to `DeformObject`:
+    `getMinCoord()`, `getMaxCoord()`, and `getCenterCoord()`.
+    """
+    deform_object = defModel.getObj(object_name)
+    return {
+        "min": deform_object.getMinCoord(),
+        "max": deform_object.getMaxCoord(),
+        "center": deform_object.getCenterCoord(),
+    }
+
+
+def collect_object_coordinates(object_names=None):
+    """Collect coordinate bounds for the standard workpiece/die objects."""
+    if object_names is None:
+        object_names = ["Workpiece", "Top Die", "Bottom Die"]
+
+    records = []
+    for object_name in object_names:
+        coordinates = get_object_coordinates(object_name)
+        for coord_type, values in coordinates.items():
+            records.append({
+                "object": object_name,
+                "coord_type": coord_type,
+                "x": values[0],
+                "y": values[1],
+                "z": values[2],
+            })
+    return records
+
+
+def save_object_coordinates(output_file_path, hit=None, stage="", object_names=None):
+    """Save workpiece/die min, max, and center coordinates to CSV."""
+    output_file_path = Path(output_file_path)
+    output_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    records = collect_object_coordinates(object_names=object_names)
+    for record in records:
+        record["hit"] = hit
+        record["stage"] = stage
+
+    fieldnames = ["hit", "stage", "object", "coord_type", "x", "y", "z"]
+    with open(output_file_path, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(records)
+
+    return output_file_path

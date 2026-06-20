@@ -1,13 +1,9 @@
 """
 Run a DEFORM multihit forging sequence from an action CSV.
 
-This runner is based on the working v3 script where bending was reduced by
-moving the top and bottom dies symmetrically during each hit. Keep that
-mirrored die motion unless you are intentionally testing a new forming setup.
-
 High-level workflow:
 1. Read a base DEFORM key file.
-2. For each hit, generate a symmetric die stroke from CSV depth/speed values.
+2. For each hit, generate die stroke(s) from CSV depth/speed values.
 3. Write and run a DEFORM database.
 4. Read the final state, reposition/rotate the workpiece for the next hit.
 5. Re-seat both dies around the workpiece and save the next-hit key file.
@@ -21,6 +17,10 @@ import sys
 import threading
 from deformRun import *
 from deformCommon import *
+try:
+    from deformPost import defPost
+except ImportError:
+    defPost = None
 from enumPosition import *
 from enumObject import *
 from deformContact import *
@@ -28,6 +28,9 @@ from deformObject import *
 from die_positioning import position_dies_before_hits, save_object_coordinates
 import time
 import pandas as pd
+import csv
+from grain_initialization import create_supplier_grain_size_string_from_key
+
 
 DEFAULT_CONFIG = {
     # Folder containing base key files on the lab computer.
@@ -37,16 +40,17 @@ DEFAULT_CONFIG = {
     # CSV describing pass position, offset, rotation, temperature, speed, and depth.
     # Small die - AF_TensileBar_P1-1_deform_info_v4_rev_bdm - w/ and w/o bdm
     # Large die - AF_TensileBar_P2-2_deform_info_v6_rev_bdm - w/ and w/o bdm
-    "action_file": "AF_TensileBar_P2-2_deform_info_v7_rev.csv",
+    "action_file": "AF_TensileBar_P2-2_deform_info_v5_rev.csv",
+    "action_version": "v5",
     # When true, action filename tags such as "bdm" can set compatible defaults.
     "apply_action_file_rules": True,
     # Parent output folder. A run-specific folder is created under this path.
     "data_path": r"C:\Users\bianco.33\Desktop\deform_auto_py\runs",
     "tp_type": "", # to be filled in later
-    "material": "4140", # materials supported include 316L, 4140, 4340, 15-5
-    "run_number": 3,
+    "material": "316L", # materials supported include 316L, 4140, 4340, 15-5
+    "run_number": 2,
     # Use an integer for a partial run, or set to "all" in config to use every CSV row.
-    "num_hits": 'all',
+    "num_hits": 5,
     # Clearance used when re-seating dies after a hit.
     "height": 0.025,
     # DEFORM max time step for the stroke. Smaller is slower but can improve stability.
@@ -65,9 +69,16 @@ DEFAULT_CONFIG = {
     "run_name": '', # to be filled in later
     "die_column": "die", # used to extract which die is used in the run
     "mesh_type" : "coarse", # supports "coarse" or "fine"
-    "stock_diameter": 0.625, # supports 0.625in only - TODO: update to support other diameters only 
-    "use_jmak": False, # TODO: update to support JMAK
+    #TODO: update stock diameters to support other diameters only
+    "stock_diameter": 0.625, # supports 0.625in only 
+    "use_jmak": True, # 316L is the only alloy with grain data
+    "mean_grain_size_um": 26.3,
     "enable_lag_time": False, # TODO: update to support lag time between hits and heats
+    # Output controls used by DOE/result-processing workflows.
+    "export_post_hit_keys": True,
+    "export_coordinate_logs": True,
+    "export_load_stroke": True,
+    "load_stroke_object": "Top Die",
     "columns": {
         "offset": "offset_in",
         "rotation": "rotation",
@@ -132,7 +143,10 @@ def apply_action_file_rules(config):
         config["position_bottom_die_before_first_hit"] = False
         
     config['tp_type'] = config['action_file'].split("_")[2]
-    config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_v4_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}"
+    if config['use_jmak']:
+        config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}_jmak"
+    else:
+        config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}"
 
     return config
 
@@ -212,7 +226,10 @@ def get_init_key(config, die):
         raise ValueError(f"No key file configured for die {die}. Supported dies: {supported}")
 
     key_file = format_config_value(key_files[die_key], config)
-    return os.path.join(resolve_path(config["key_path"], config), key_file)
+    if config['use_jmak']:
+        return os.path.join(resolve_path(config["key_path"], config), key_file[:-4]+"_jmak.key")
+    else:
+        return os.path.join(resolve_path(config["key_path"], config), key_file)
 
 
 def validate_config(config, actions_df, action_path, init_key):
@@ -251,6 +268,9 @@ def validate_config(config, actions_df, action_path, init_key):
         raise ValueError("position_dies_before_first_hit must be true or false.")
     if not isinstance(config["position_bottom_die_before_first_hit"], bool):
         raise ValueError("position_bottom_die_before_first_hit must be true or false.")
+    for key in ["export_post_hit_keys", "export_coordinate_logs", "export_load_stroke"]:
+        if not isinstance(config.get(key, True), bool):
+            raise ValueError(f"{key} must be true or false.")
 
 
 def celsius_to_fahrenheit(temp_c):
@@ -318,7 +338,7 @@ def set_symmetric_die_motion(plan, speed):
 
     The signs intentionally oppose each other: as the top die moves toward the
     workpiece, the bottom die moves toward it from the opposite side. This is
-    the v3 anti-bending behavior and should be preserved as the default.
+    the anti-bending behavior and should be preserved as the default.
     """
     defModel.importKeyString(f"""MOVCTL       2       1       2    0.0000000000E+000    0.0000000000E+000   -1.0000000000E+000       7
         {plan["stroke_start"]:.6E}    {speed:.6E}
@@ -423,7 +443,7 @@ def reseat_dies(height, top_die_interference, bottom_die_interference, position_
 def reposition_workpiece(actions_df, columns, hit):
     """Apply the next CSV offset and rotation to the workpiece.
 
-    This preserves the behavior from the working v3 script: the workpiece is
+    This preserves the behavior from the working script: the workpiece is
     repositioned between hits, while each hit itself uses symmetric die motion.
     """
     offset_val = -1 * actions_df[columns["offset"]].values[hit]
@@ -452,6 +472,172 @@ def print_runtime_summary(config, action_path, init_key, die, num_hits, run_name
     print(f"  Init key   : {init_key}")
     print(f"  Runs path  : {data_path}")
     print(f"  Die motion : {die_motion_mode}")
+   
+    
+def is_number_token(token):
+    """Return True when a load-stroke text token can be parsed as a number."""
+    try:
+        float(str(token).replace("D", "E"))
+        return True
+    except ValueError:
+        return False
+
+
+def make_unique_columns(columns):
+    """Create safe, unique CSV column names from exporter text headers."""
+    seen = {}
+    result = []
+    for index, column in enumerate(columns, start=1):
+        safe = str(column).strip().replace("/", "_").replace("-", "_")
+        safe = safe.replace("(", "").replace(")", "").replace(".", "")
+        safe = safe or f"column_{index}"
+        count = seen.get(safe, 0)
+        seen[safe] = count + 1
+        result.append(safe if count == 0 else f"{safe}_{count + 1}")
+    return result
+
+def convert_load_stroke_text_to_csv(text_path, csv_path):
+    """Convert DEFORM load-stroke text output to a simple comma CSV.
+
+    `defPost.export.loadStrokeTime` writes the same style of text file as
+    DEFORM text post. The exact header can vary by model/version, so this
+    converter keeps the parsing intentionally tolerant.
+    """
+    rows = []
+    with open(text_path, "r") as file:
+        for line in file:
+            line = line.strip()
+            if not line or line.startswith(("#", "$", "*")):
+                continue
+            if "," in line:
+                tokens = [token.strip() for token in line.split(",") if token.strip()]
+            else:
+                tokens = line.split()
+            if tokens:
+                rows.append(tokens)
+
+    if not rows:
+        raise ValueError(f"No load-stroke rows found in {text_path}")
+
+    first_row_is_header = any(not is_number_token(token) for token in rows[0])
+    if first_row_is_header:
+        header = make_unique_columns(rows[0])
+        data_rows = rows[1:]
+    else:
+        header = [f"column_{idx}" for idx in range(1, len(rows[0]) + 1)]
+        data_rows = rows
+
+    width = len(header)
+    normalized_rows = []
+    for row in data_rows:
+        if len(row) < width:
+            row = row + [""] * (width - len(row))
+        elif len(row) > width:
+            row = row[:width]
+        normalized_rows.append(row)
+
+    with open(csv_path, "w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(header)
+        writer.writerows(normalized_rows)
+
+    return csv_path
+
+
+def get_object_by_name_or_number(object_name):
+    """Return a DEFORM object by name, falling back to object number 1."""
+    try:
+        return defModel.getObj(object_name)
+    except Exception:
+        return defModel.getObjByNo(1)
+
+
+def write_load_stroke_fallback_csv(output_file_path, hit, object_name, source, note):
+    """Write one-row load/stroke summary from `getObjInfo()` as a fallback."""
+    deform_object = get_object_by_name_or_number(object_name)
+    obj_info = deform_object.getObjInfo()
+    row = {
+        "hit": hit,
+        "object": object_name,
+        "object_no": getattr(deform_object, "objNo", ""),
+        "source": source,
+        "note": note,
+        "strokeX": getattr(obj_info, "strokeX", ""),
+        "strokeY": getattr(obj_info, "strokeY", ""),
+        "strokeZ": getattr(obj_info, "strokeZ", ""),
+        "loadX": getattr(obj_info, "loadX", ""),
+        "loadY": getattr(obj_info, "loadY", ""),
+        "loadZ": getattr(obj_info, "loadZ", ""),
+    }
+    with open(output_file_path, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(row.keys()))
+        writer.writeheader()
+        writer.writerow(row)
+    return output_file_path
+
+
+def export_load_stroke_csv(run_dir, hit, object_name="Top Die"):
+    """Export per-hit load-stroke data to CSV.
+
+    The primary path uses the DEFORM API reference-manual call
+    `defPost.export.loadStrokeTime(outputFileName, objNo)`. If that exporter
+    fails, a one-row load/stroke summary is written from object info so every
+    completed hit still has a load-stroke CSV for the DOE dataset.
+    """
+    os.makedirs(run_dir, exist_ok=True)
+    text_path = os.path.join(run_dir, f"load_stroke_hit{hit}.txt")
+    csv_path = os.path.join(run_dir, f"load_stroke_hit{hit}.csv")
+
+    try:
+        if defPost is None:
+            raise ImportError("deformPost.defPost is not available.")
+        deform_object = get_object_by_name_or_number(object_name)
+        object_no = int(getattr(deform_object, "objNo"))
+        defPost.export.loadStrokeTime(text_path, object_no)
+        return convert_load_stroke_text_to_csv(text_path, csv_path)
+    except Exception as exc:
+        return write_load_stroke_fallback_csv(
+            output_file_path=csv_path,
+            hit=hit,
+            object_name=object_name,
+            source="getObjInfo_fallback",
+            note=str(exc),
+        )
+
+
+def save_coordinates_if_enabled(config, run_dir, hit, stage):
+    """Save coordinate logs when enabled without stopping a completed solve."""
+    if not config.get("export_coordinate_logs", True):
+        return ""
+    output_path = os.path.join(run_dir, f"object_coordinates_hit{hit}_{stage}.csv")
+    try:
+        save_object_coordinates(output_file_path=output_path, hit=hit, stage=stage)
+        return output_path
+    except Exception as exc:
+        print(f"WARNING: Coordinate export failed for hit {hit}, stage {stage}: {exc}")
+        return ""
+
+
+def export_hit_outputs(config, run_dir, hit, stage, write_key=True):
+    """Write standard per-hit artifacts for DOE processing."""
+    if config.get("export_coordinate_logs", True):
+        save_coordinates_if_enabled(config, run_dir, hit, stage)
+
+    if config.get("export_load_stroke", True) and hit > 0 and stage == "final":
+        try:
+            export_load_stroke_csv(
+                run_dir=run_dir,
+                hit=hit,
+                object_name=config.get("load_stroke_object", "Top Die"),
+            )
+        except Exception as exc:
+            print(f"WARNING: Load-stroke export failed for hit {hit}: {exc}")
+
+    if write_key and config.get("export_post_hit_keys", True):
+        key_path = os.path.join(run_dir, f"af-hit-{hit}_{stage}.KEY")
+        defModel.writeKey(key_path)
+        return key_path
+    return ""
 
 
 def main(config_path=None):
@@ -479,6 +665,7 @@ def main(config_path=None):
     bottom_die_interference = float(config["bottom_die_interference"])
     data_path = resolve_path(config["data_path"], config)
     run_name = format_config_value(config["run_name"], config)
+    mean_grain_size_um = float(config["mean_grain_size_um"])
 
     print_runtime_summary(config, action_path, init_key, die, num_hits, run_name, data_path, die_motion_mode)
 
@@ -495,7 +682,11 @@ def main(config_path=None):
         if hit == 0:
             print("Reading base keyfile......")
             defModel.readKey(init_key)
-
+            
+            # Update initial grain size 
+            if config["use_jmak"]:
+                defModel.importKeyString(create_supplier_grain_size_string_from_key(init_key, mean_grain_size_um))
+            
             offset_val = -1 * actions_df[columns["offset"]].values[hit]
             rot_ang = actions_df[columns["rotation"]].values[hit]
             
@@ -510,6 +701,7 @@ def main(config_path=None):
             print(f"""\tOffset = {offset_val},
               Position = {actions_df[columns["position"]].values[hit]},
               Rotation = {rot_ang}""")
+               
 
         else:
             # CSV row hit-1 defines the hit being solved. CSV row hit defines the
@@ -551,11 +743,7 @@ def main(config_path=None):
               Total Steps = {total_steps}
               """)
               
-            save_object_coordinates(
-                output_file_path=os.path.join(run_dir, f"object_coordinates_hit{hit}.csv"),
-                hit=hit,
-                stage="after_die_positioning",
-            )
+            save_coordinates_if_enabled(config, run_dir, hit, "pre_solve")
             
             defModel.simCtrl.setStepSettings(
                 f'NSTART=-1, NSTEP={plan["hit_steps"]}, STPINC={save_step_size}, DTMAX={time_step}'
@@ -580,19 +768,24 @@ def main(config_path=None):
         if hit > 0:
             run_job()
             defModel.readDb(os.path.join(run_dir, db_name), 0)
-
+            export_hit_outputs(config, run_dir, hit, "final", write_key=True)
+        else:
+            export_hit_outputs(config, run_dir, hit, "initial", write_key=True)
+            
         if 0 < hit < num_hits:
             # Prepare geometry for the next hit from the final solved state.
             reposition_workpiece(actions_df, columns, hit)
             reseat_dies(height, top_die_interference, bottom_die_interference, position_bottom_die)
-
-        defModel.writeKey(os.path.join(run_dir, f"af-hit-{hit}_post.KEY"))
+            export_hit_outputs(config, run_dir, hit, "post", write_key=True)
+        elif hit > 0:
+            # For the last hit, post and final are intentionally identical.
+            export_hit_outputs(config, run_dir, hit, "post", write_key=True)
 
         if (hit + 1) <= num_hits:
             next_hit_dir = os.path.join(data_path, run_name, f"{run_name}-hit{hit + 1}")
             os.makedirs(next_hit_dir, exist_ok=True)
             defModel.writeKey(os.path.join(next_hit_dir, f"af-hit-{hit + 1}.KEY"))
-
+            
     print("\n================ DONE: ALL HITS COMPLETE ================")
 
 

@@ -53,10 +53,11 @@ def build_dataset_from_manifest(
     """
     if metric_file_columns is None:
         metric_file_columns = {
+            "initial_microstructure_csv": "initial_microstructure_csv",
             "microstructure_csv": "microstructure_csv",
             "load_stroke_csv": "load_stroke_csv",
             "coordinate_csv": "coordinate_csv",
-            "centerline_csv": "centerline_csv",
+            "damage_csv": "damage_csv",
         }
 
     manifest = load_manifest(manifest_path)

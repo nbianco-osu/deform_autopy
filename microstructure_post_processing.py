@@ -14,7 +14,11 @@ followed by an `ELMDEN` block, where each element's grain state uses four lines.
 
 from pathlib import Path
 import pandas as pd
-from deformModel import defModel
+
+try:
+    from deformModel import defModel
+except ImportError:
+    defModel = None
 
 
 GRAIN_COLUMNS = [
@@ -122,6 +126,12 @@ def save_key_at_db_step(run_dir, key_file_path, db_file_path, output_key_path, s
     key_file_path = Path(key_file_path)
     db_file_path = Path(db_file_path)
     output_key_path = Path(output_key_path)
+
+    if defModel is None:
+        raise ImportError(
+            "DEFORM API module deformModel is not available. "
+            "Run DB-to-KEY extraction on the lab computer with the DEFORM API path configured."
+        )
 
     defModel.setCurrentDir(str(run_dir))
     defModel.readKey(str(key_file_path))

@@ -13,7 +13,6 @@ The functions return DEFORM key strings so run scripts can choose when to call
 
 import math
 import re
-
 import numpy as np
 
 
@@ -54,7 +53,7 @@ def read_num_grains_from_key(key_file_path, object_number=1):
                 values = line.split()
                 if len(values) < 4:
                     raise ValueError(f"Could not parse number of grains from line: {line!r}")
-                return int(values[3])
+                return int(values[2])
 
     raise ValueError(f"No ELMCON line found for object {object_number} in {key_file_path}")
 
