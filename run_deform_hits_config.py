@@ -32,13 +32,15 @@ import csv
 from grain_initialization import create_supplier_grain_size_string_from_key
 from run_deform_post_processing import process_run
 
+USER_PATH = os.path.expanduser('~')
+
 DEFAULT_CONFIG = {
     # Folder containing base key files on the lab computer.
-    "key_path": r"C:\Users\bianco.33\Desktop\deform_auto_py\key_files",
+    "key_path": os.path.join(USER_PATH,r"Desktop\deform_auto_py\key_files"),
     "custom_key_bool": True,
-    "custom_key_name": "",
+    "custom_key_name": "agility_forge_die2_1in_stock_IN625mat_coarse_rev.key",
     # Folder containing the action CSV files on the lab computer.
-    "action_path": r"C:\Users\bianco.33\Desktop\deform_auto_py\action_files",
+    "action_path": os.path.join(USER_PATH,r"Desktop\deform_auto_py\action_files"),
     # CSV describing pass position, offset, rotation, temperature, speed, and depth.
     # Small die - AF_TensileBar_P1-1_deform_info_v4_rev_bdm - w/ and w/o bdm
     # Large die - AF_TensileBar_P2-2_deform_info_v6_rev_bdm - w/ and w/o bdm
@@ -47,7 +49,7 @@ DEFAULT_CONFIG = {
     # When true, action filename tags such as "bdm" can set compatible defaults.
     "apply_action_file_rules": True,
     # Parent output folder. A run-specific folder is created under this path.
-    "data_path": r"C:\Users\bianco.33\Desktop\deform_auto_py\runs",
+    "data_path": os.path.join(USER_PATH,r"Desktop\deform_auto_py\runs"),
     "tp_type": "", # to be filled in later
     "material": "316L", # materials supported include 316L, 4140, 4340, 15-5
     "run_number": 1,
@@ -666,7 +668,7 @@ def post_process_completed_run(config, config_path, run_root_dir):
 
     print("\n================ POST-PROCESSING RUN ================")
     try:
-
+        print(config_path,run_root_dir)
         summary = process_run(
             config_path=config_path,
             run_dir=run_root_dir,
