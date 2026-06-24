@@ -104,7 +104,8 @@ def load_default_config_from_runner(runner_path=RUNNER_PATH):
     """Read DEFAULT_CONFIG from run_deform_hits_config.py without importing it.
 
     Importing the runner can require DEFORM API modules. Parsing the assignment
-    from source keeps this post-processor usable for file-only processing too.
+    from source keeps this post-processor usable for file-only processing when
+    DEFAULT_CONFIG contains only literal values.
     """
     runner_path = Path(runner_path)
     tree = ast.parse(runner_path.read_text())
@@ -113,18 +114,38 @@ def load_default_config_from_runner(runner_path=RUNNER_PATH):
             continue
         for target in node.targets:
             if isinstance(target, ast.Name) and target.id == "DEFAULT_CONFIG":
-                return ast.literal_eval(node.value)
+                try:
+                    return ast.literal_eval(node.value)
+                except (ValueError, TypeError) as exc:
+                    raise ValueError(
+                        "DEFAULT_CONFIG contains non-literal Python expressions. "
+                        "Run post-processing with a JSON config or pass the already "
+                        "evaluated in-memory config from run_deform_hits_config.py."
+                    ) from exc
     raise ValueError(f"DEFAULT_CONFIG was not found in {runner_path}")
 
 
-def load_effective_config(config_path=None):
-    """Load a JSON config or the runner's built-in DEFAULT_CONFIG.
+def load_effective_config(config_path=None, config_override=None):
+    """Load an in-memory config, a JSON config, or the runner DEFAULT_CONFIG.
 
     Returns
     -------
     tuple
         `(config, config_dir, config_source, config_path_for_resolution)`.
     """
+    if config_override is not None:
+        config = json.loads(json.dumps(config_override, default=str))
+        if config_path:
+            config_path = Path(config_path).resolve()
+            config_dir = config_path.parent
+            config_source = f"in-memory config from {config_path}"
+            config_path_for_resolution = config_path
+        else:
+            config_dir = Path(config.get("_config_dir", RUNNER_PATH.parent)).resolve()
+            config_source = "in-memory config from run_deform_hits_config.py"
+            config_path_for_resolution = config_dir / "__in_memory_config__.json"
+        return config, config_dir, config_source, config_path_for_resolution
+
     if config_path:
         config_path = Path(config_path).resolve()
         return load_json(config_path), config_path.parent, str(config_path), config_path
@@ -445,6 +466,7 @@ def process_hit(run_dir, run_name, hit, output_dir):
 
 def process_run(
     config_path=None,
+    config_override=None,
     run_dir=None,
     output_subdir="post_processed",
     damage_object="Workpiece",
@@ -458,6 +480,10 @@ def process_run(
     config_path : str or Path, optional
         JSON config used by the run. If omitted, DEFAULT_CONFIG is read from
         run_deform_hits_config.py.
+    config_override : dict, optional
+        Already evaluated config dictionary from `run_deform_hits_config.py`.
+        Automatic post-processing uses this so DEFAULT_CONFIG can contain
+        user/path helper calls without breaking AST parsing.
     run_dir : str or Path, optional
         Completed run folder. If omitted, the folder is inferred from
         `data_path` and `run_name` in the config.
@@ -471,7 +497,8 @@ def process_run(
         Optional metric weights used to add an objective column.
     """
     config, config_dir, config_source, config_path_for_resolution = load_effective_config(
-        config_path
+        config_path=config_path,
+        config_override=config_override,
     )
     action_path = get_action_path(config, config_dir)
     num_hits = infer_num_hits(config, action_path)
