@@ -1,280 +1,299 @@
-# DEFORM Dataset, Metrics, and Bayesian Optimization
+# DEFORM DOE, Dataset, and Bayesian Optimization
 
-This optimization layer is intentionally separate from the DEFORM run script.
-The goal is to build a clean dataset first, then use that dataset for surrogate
-modeling and Bayesian optimization.
+This layer turns completed DEFORM runs into a dataset, trains a surrogate model,
+and proposes the next candidate runs. It is intentionally staged because DEFORM
+runs are expensive and should be inspected before launching large batches.
 
-## Why This Order
+## Current Loop
 
-DEFORM runs are expensive. Reinforcement learning usually needs many trials, so
-it is not the best first step. A better first workflow is:
+The recommended optimization loop is:
 
-1. Run a designed set of simulations.
-2. Save inputs, settings, and post-processed outputs.
-3. Compute metrics such as grain-size error, max damage, load, and runtime.
-4. Train a surrogate model.
-5. Use Bayesian optimization to propose the next few DEFORM runs.
+1. Generate an initial DOE candidate table.
+2. Convert candidates into action CSVs and config JSONs.
+3. Run DEFORM.
+4. Post-process completed runs.
+5. Build/update the dataset using completed runs only.
+6. Train a surrogate model.
+7. Propose next candidates with Bayesian optimization.
+8. Repeat with the next round.
 
-The dataset produced by this workflow can later support RL or other policy
-learning approaches.
+The loop is not an unattended infinite loop. Each stage is controlled by flags
+in `run_initial_doe.py`.
 
-## Files
+## Important Files
 
-- `run_manifest.py`
-  - CSV manifest utilities for logging run metadata and status.
+- `run_initial_doe.py`
+  - Main Spyder launcher for DOE and next-candidate rounds.
+  - Controls preparation, execution, processing, proposal, dataset combining,
+    and reporting through boolean flags.
 
-- `metrics.py`
-  - Converts post-processing files into numeric metrics.
-  - Supports microstructure summaries, load-stroke summaries, coordinate
-    centering errors, and damage summaries.
+- `doe_runner.py`
+  - Converts candidate rows into DEFORM action CSVs and config JSONs.
+  - Logs records to a manifest.
+  - Can execute `run_deform_hits_config.py`.
+
+- `run_deform_hits_config.py`
+  - Main DEFORM runner.
+  - Automatically creates per-hit outputs and calls post-processing after all
+    hits complete when `post_process_after_run` is true.
+
+- `run_deform_post_processing.py`
+  - Single-run post-processor.
+  - Creates `post_processed` outputs such as `hit_summary.csv`,
+    `run_metrics.csv`, and `run_summary.json`.
+
+- `process_doe_results.py`
+  - Processes completed manifest rows.
+  - Captures initial/post-hit microstructure, damage, coordinates, and
+    load-stroke outputs.
+  - Builds `dataset.csv`.
 
 - `dataset_builder.py`
-  - Joins manifest rows, metadata, and metrics into one training table.
+  - Joins manifest metadata and metrics into training rows.
+  - Uses completed runs by default and ignores planned/running/failed rows.
 
-- `optimizers/doe.py`
-  - Generates initial design-of-experiments candidates.
-  - Supports Latin hypercube and small full-factorial grids.
+- `metrics.py`
+  - Computes summary metrics for grain size, load-stroke data, coordinates, and
+    damage.
 
 - `surrogate_model.py`
   - Trains tabular surrogate models.
-  - Supports Random Forest, Extra Trees, and Gaussian Process if scikit-learn is
-    installed.
+  - Supports Random Forest, Extra Trees, and Gaussian Process when dependencies
+    are available.
+
+- `optimizers/doe.py`
+  - Generates DOE candidates, including Latin hypercube and grid candidates.
 
 - `optimizers/bayesian.py`
   - Proposes new candidates using expected improvement.
 
-- `doe_runner.py`
-  - Turns candidate rows into DEFORM action CSVs and runner configs.
-  - Logs planned runs to the manifest.
-  - Optionally executes `run_deform_hits_v3_improved.py`.
+- `visualize_doe_results.py`
+  - Builds an HTML/CSV report for the current study.
+  - Creates plots when `matplotlib` is installed.
 
-- `run_initial_doe.py`
-  - Spyder-friendly one-file launcher for the first DOE.
-  - Generates candidates, creates a DOE template config, prepares action/config
-    files, optionally launches runs, processes results, builds the dataset, and
-    can propose the next Bayesian candidate batch.
+## Runner Outputs Used by Optimization
 
-- `process_doe_results.py`
-  - Processes completed DOE runs from the manifest.
-  - Saves initial pre-run grain state, post-hit microstructure CSVs, max damage
-    summaries, and discovered result CSV paths.
-  - Updates the manifest and builds `dataset.csv`.
+`run_deform_hits_config.py` writes per-hit outputs:
 
-## Recommended Study Loop
+- `af-hit-N_final.KEY`
+- `af-hit-N_post.KEY`
+- `object_coordinates_hitN_<stage>.csv`
+- `load_stroke_hitN.csv`
 
-### 1. Define Input Bounds
+Automatic post-processing writes:
 
-Example:
-
-```python
-bounds = {
-    "depth_in": [0.01, 0.06],
-    "speed_in/s": [0.5, 2.0],
-    "forging_temp_c": [900, 1150],
-    "lag_time_s": [0, 10],
-}
+```text
+<run_dir>/post_processed/
 ```
 
-### 2. Generate Initial DOE Candidates
+with:
 
-The simplest Spyder workflow is to open `run_initial_doe.py`, edit the user
-settings at the top, and run it. Keep `EXECUTE_RUNS = False` for the first pass
-so it only creates candidate files:
+- `initial_microstructure.csv`
+- `microstructure_hit<N>.csv`
+- `hit_summary.csv`
+- `run_metrics.csv`
+- `coordinates_all_hits.csv`
+- `load_stroke_all_hits.csv`
+- `damage_summary.csv`
+- `run_summary.json`
+
+These files are the raw material for DOE result processing and dataset building.
+
+## Key `run_initial_doe.py` Flags
+
+Use these flags in staged passes:
+
+```python
+PREPARE_RUNS = True
+EXECUTE_RUNS = False
+
+PROCESS_RESULTS = False
+PROPOSE_NEXT_CANDIDATES = False
+
+RUN_NEXT_CANDIDATES = False
+EXECUTE_NEXT_CANDIDATES = False
+PROCESS_NEXT_CANDIDATES = False
+
+COMBINE_DATASETS = False
+MAKE_REPORT = False
+```
+
+### Pass 1: Prepare Initial DOE Inputs
 
 ```python
 PREPARE_RUNS = True
 EXECUTE_RUNS = False
 PROCESS_RESULTS = False
+PROPOSE_NEXT_CANDIDATES = False
 ```
 
-After inspecting generated action/config files, set:
+Inspect the generated action CSVs and config JSONs before executing.
+
+### Pass 2: Execute Initial DOE
 
 ```python
+PREPARE_RUNS = False
 EXECUTE_RUNS = True
+PROCESS_RESULTS = False
 ```
 
-and run the file again.
+This launches the prepared DEFORM runs.
 
-After DEFORM finishes, process the completed runs into a dataset:
+### Pass 3: Process Initial DOE and Propose Next Candidates
 
 ```python
 PREPARE_RUNS = False
 EXECUTE_RUNS = False
 PROCESS_RESULTS = True
-PROPOSE_NEXT_CANDIDATES = False
-```
-
-When the dataset has enough completed rows and `scikit-learn` is available, ask
-the same launcher to propose the next candidates:
-
-```python
-PREPARE_RUNS = False
-PROCESS_RESULTS = True
 PROPOSE_NEXT_CANDIDATES = True
+MAKE_REPORT = True
 ```
 
-This writes `dataset.csv`, `surrogate_report.json`, and `candidates_next.csv`
-under the study folder.
+This builds `dataset.csv`, trains/proposes when possible, and writes
+`candidates_next.csv`.
 
-The lower-level manual candidate generation workflow is:
+### Pass 4: Prepare Next-Candidate Runs
 
 ```python
-from optimizers.doe import latin_hypercube, save_candidates
-
-candidates = latin_hypercube(bounds, n_samples=20, random_seed=1)
-save_candidates(candidates, "optimization/candidates_initial.csv")
+RUN_NEXT_CANDIDATES = True
+EXECUTE_NEXT_CANDIDATES = False
 ```
 
-These candidate rows can be converted into action CSVs or run configs.
+Inspect the generated next-round action/config files.
 
-### 2b. Turn DOE Candidates Into DEFORM Runs
-
-Use `doe_runner.py` to create one action CSV and one config JSON per candidate.
-By default it performs a dry run and does not launch DEFORM:
-
-```powershell
-python doe_runner.py `
-  --candidates optimization/candidates_initial.csv `
-  --template-config configs/run_deform_hits_v3_config.example.json `
-  --output-root optimization `
-  --study-name grain_damage_study_001 `
-  --manifest optimization/manifest.csv `
-  --runner-script run_deform_hits_v3_improved.py
-```
-
-When the generated inputs look correct, add `--execute`:
-
-```powershell
-python doe_runner.py `
-  --candidates optimization/candidates_initial.csv `
-  --template-config configs/run_deform_hits_v3_config.example.json `
-  --output-root optimization `
-  --study-name grain_damage_study_001 `
-  --manifest optimization/manifest.csv `
-  --runner-script run_deform_hits_v3_improved.py `
-  --execute
-```
-
-Candidate columns that match action CSV columns, such as `depth_in` or
-`speed_in/s`, are written into the generated action CSV. Candidate columns that
-match config keys, such as `height`, `time_step`, or `run_number`, are written
-into the generated config.
-
-The default `--apply-mode all_rows` applies candidate values to every row in
-the action CSV. Use `--apply-mode hit_row` with a `hit` column in the candidates
-CSV to modify only one action row.
-
-### 3. Log Runs to a Manifest
+### Pass 5: Execute Next-Candidate Runs
 
 ```python
-from run_manifest import append_manifest_record
-
-append_manifest_record(
-    "optimization/manifest.csv",
-    {
-        "study_name": "grain_damage_study_001",
-        "run_name": "af_tensile_test_001",
-        "run_dir": r"C:\path\to\runs\af_tensile_test_001",
-        "status": "completed",
-        "material": "4140",
-        "die": 2,
-        "die_motion_mode": "symmetric",
-    },
-    metadata={
-        "depth_in": 0.04,
-        "speed_in/s": 1.0,
-        "lag_time_s": 2.0,
-    },
-)
+RUN_NEXT_CANDIDATES = False
+EXECUTE_NEXT_CANDIDATES = True
 ```
 
-### 4. Compute Metrics and Build Dataset
-
-Use `process_doe_results.py`, or set `PROCESS_RESULTS = True` in
-`run_initial_doe.py`, to update the manifest and build the dataset. The
-processor captures:
-
-- `initial_microstructure_csv`
-- `microstructure_csv`
-- `damage_csv`
-- `coordinate_csv`
-- `load_stroke_csv`
-
-`dataset_builder.py` merges those paths into metrics automatically.
+### Pass 6: Process Next Round and Combine Datasets
 
 ```python
-from process_doe_results import process_doe_results
-
-process_doe_results(
-    manifest_path="optimization/manifest.csv",
-    dataset_path="optimization/dataset.csv",
-    objective_weights={
-        "damage_max": 100.0,
-        "grain_std_um": 1.0,
-        "top_die_center_distance": 10.0,
-    },
-)
+PROCESS_NEXT_CANDIDATES = True
+COMBINE_DATASETS = True
+PROPOSE_NEXT_CANDIDATES = True
+MAKE_REPORT = True
 ```
 
-For better objectives, add explicit terms such as grain-size error, maximum
-damage, maximum load penalty, and runtime penalty.
-
-### 5. Train a Surrogate
-
-```python
-from surrogate_model import train_surrogate, save_training_report
-
-model, report = train_surrogate(
-    dataset_csv_path="optimization/dataset.csv",
-    target_column="objective",
-    model_type="random_forest",
-)
-save_training_report(report, "optimization/surrogate_report.json")
-```
-
-### 6. Propose Bayesian Optimization Candidates
-
-```python
-from optimizers.bayesian import propose_bayesian_candidates
-
-next_candidates = propose_bayesian_candidates(
-    model=model,
-    completed_dataset="optimization/dataset.csv",
-    bounds=bounds,
-    target_column="objective",
-    n_random_candidates=2000,
-    n_select=5,
-    minimize=True,
-)
-
-next_candidates.to_csv("optimization/candidates_next.csv", index=False)
-```
-
-## Suggested Objective Metrics
-
-Start with a scalar objective like:
+The combined dataset is written as:
 
 ```text
-objective =
-    grain_size_error_weight * abs(mean_grain_size - target_grain_size)
-  + grain_std_weight * grain_size_std
-  + damage_weight * damage_max
-  + load_weight * load_limit_penalty
-  + runtime_weight * runtime_minutes
+optimization/<study_name>/dataset_all.csv
 ```
 
-Keep individual metrics in the dataset even when using a combined objective.
-That lets you later change priorities without rerunning DEFORM.
+## Completed Runs Only
 
-## Next Integration Step
+Training and Bayesian proposal should use completed runs only.
 
-The result-processing loop is now available through `process_doe_results.py`
-and `run_initial_doe.py`. The remaining practical upgrades are:
+`dataset_builder.py` and `process_doe_results.py` are designed to ignore
+planned/running/failed rows unless explicitly told otherwise. This prevents
+placeholder manifest rows from being treated as valid training data.
 
-- Confirm the exported coordinate logs, load-stroke CSVs, and final/post-hit
-  key files are populated as expected after the first lab-computer run.
-- Use `doe_runner.py`'s default skip-existing behavior when rerunning the
-  launcher. Pass `--allow-duplicate-manifest-records` only when duplicate
-  records are intentional.
-- Tune `OBJECTIVE_WEIGHTS` after checking real dataset units from the first
-  completed DOE.
+## Candidate Variables
+
+Typical bounded inputs include:
+
+```python
+BOUNDS = {
+    "depth_in": [0.01, 0.06],
+    "speed_in/s": [0.5, 2.0],
+    "forging_temp_c": [900, 1150],
+}
+```
+
+Candidate columns that match action CSV columns are applied to generated action
+files. Candidate columns that match config keys are applied to generated config
+JSON files.
+
+Examples:
+
+- `depth_in`
+- `speed_in/s`
+- `forging_temp_c`
+- `height`
+- `time_step`
+- `die_motion_mode`
+- `die_motion_axis`
+
+## Objective Weights
+
+Objective weights are intentionally easy to change after results are processed.
+The current plan is to tune `OBJECTIVE_WEIGHTS` later with Bayesian
+optimization.
+
+Example:
+
+```python
+OBJECTIVE_WEIGHTS = {
+    "damage_max": 100.0,
+    "grain_std_um": 1.0,
+    "top_die_center_distance": 10.0,
+}
+```
+
+Avoid including bending metrics until the project explicitly adds and validates
+those measurements.
+
+## Reports and Visualization
+
+`visualize_doe_results.py` reads datasets, manifests, candidate files, and
+surrogate reports and writes a reporting folder with:
+
+- `index.html`
+- `dataset_numeric_summary.csv`
+- plot PNGs when `matplotlib` is available
+
+`run_initial_doe.py` can call this automatically when:
+
+```python
+MAKE_REPORT = True
+```
+
+## Manual Processing
+
+For one completed run, use:
+
+```python
+from run_deform_post_processing import process_run
+
+process_run(config_path=r"C:\path\to\run_config.json")
+```
+
+If the run used the in-file `DEFAULT_CONFIG`, automatic post-processing is the
+preferred path because the runner passes the evaluated config directly. Manual
+`process_run()` with no arguments works only when `DEFAULT_CONFIG` contains
+literal values.
+
+## Common Issues
+
+### `No module named surrogate_model`
+
+Run from the codebase folder or make sure Spyder's working directory is:
+
+```text
+C:\Users\nbian\OneDrive\Documents\DEFORM API
+```
+
+### `columns are missing: {...}`
+
+The dataset probably included planned/running rows or non-feature columns.
+Use completed runs only and train only on bounded input columns.
+
+### `malformed node or string ... ast.Call`
+
+This happens when standalone post-processing tries to parse a `DEFAULT_CONFIG`
+that contains computed values or function calls. Automatic post-processing from
+`run_deform_hits_config.py` avoids this by passing the evaluated config directly.
+
+### No Plots in Report
+
+`visualize_doe_results.py` still writes HTML/CSV summaries without `matplotlib`.
+Install `matplotlib` on the lab environment if plot PNGs are needed.
+
+## Supporting Documentation
+
+- `output/pdf/run_deform_hits_config_sop.pdf`
+- `output/pdf/deform_doe_loop_instructions.pdf`
+- `outputs/DEFORM_workflow_and_file_map.pptx`
