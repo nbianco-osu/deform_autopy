@@ -176,10 +176,13 @@ def infer_run_name(config, num_hits=None):
     action_version = config.get("action_version", "v")
     run_number = config.get("run_number", "run")
     hit_count = num_hits if num_hits is not None else config.get("num_hits", "hits")
-
+    axis_tag = ""
+    if str(config.get("die_motion_axis", "z")).lower() == "y":
+        axis_tag = "_yaxis"
+        
     run_name = (
         f"af_{tp_type}_{material}_rev_{action_version}_run{run_number}_"
-        f"{hit_count}hits_{die_motion}"
+        f"{hit_count}hits_{die_motion}{axis_tag}"
     )
     if config.get("use_jmak", False):
         run_name += "_jmak"

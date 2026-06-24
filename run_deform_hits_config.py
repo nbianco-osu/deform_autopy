@@ -25,32 +25,42 @@ from enumPosition import *
 from enumObject import *
 from deformContact import *
 from deformObject import *
-from die_positioning import position_dies_before_hits, save_object_coordinates
+from die_positioning import (
+    format_vector,
+    get_die_motion_axis_vectors,
+    position_dies_before_hits,
+    save_object_coordinates,
+    scale_vector,
+)
 import time
 import pandas as pd
 import csv
 from grain_initialization import create_supplier_grain_size_string_from_key
+from run_deform_post_processing import process_run
 
+USER_PATH = os.path.expanduser('~')
 
 DEFAULT_CONFIG = {
     # Folder containing base key files on the lab computer.
-    "key_path": r"C:\Users\bianco.33\Desktop\deform_auto_py\key_files",
+    "key_path": os.path.join(USER_PATH,r"Desktop\deform_auto_py\key_files"),
+    "custom_key_bool": True,
+    "custom_key_name": "agility_forge_die2_1in_stock_IN625mat_coarse_rev.key",
     # Folder containing the action CSV files on the lab computer.
-    "action_path": r"C:\Users\bianco.33\Desktop\deform_auto_py\action_files",
+    "action_path": os.path.join(USER_PATH,r"Desktop\deform_auto_py\action_files"),
     # CSV describing pass position, offset, rotation, temperature, speed, and depth.
     # Small die - AF_TensileBar_P1-1_deform_info_v4_rev_bdm - w/ and w/o bdm
     # Large die - AF_TensileBar_P2-2_deform_info_v6_rev_bdm - w/ and w/o bdm
-    "action_file": "AF_TensileBar_P2-2_deform_info_v5_rev.csv",
-    "action_version": "v5",
+    "action_file": "AF_TensileBar_P2-2_deform_info_v6_rev.csv",
+    "action_version": "v6",
     # When true, action filename tags such as "bdm" can set compatible defaults.
     "apply_action_file_rules": True,
     # Parent output folder. A run-specific folder is created under this path.
-    "data_path": r"C:\Users\bianco.33\Desktop\deform_auto_py\runs",
+    "data_path": os.path.join(USER_PATH,r"Desktop\deform_auto_py\runs"),
     "tp_type": "", # to be filled in later
     "material": "316L", # materials supported include 316L, 4140, 4340, 15-5
     "run_number": 2,
     # Use an integer for a partial run, or set to "all" in config to use every CSV row.
-    "num_hits": 5,
+    "num_hits": 1,
     # Clearance used when re-seating dies after a hit.
     "height": 0.025,
     # DEFORM max time step for the stroke. Smaller is slower but can improve stability.
@@ -60,7 +70,10 @@ DEFAULT_CONFIG = {
     "bottom_die_retract_speed_multiplier": 1.5,
     "bottom_die_retract_lead_steps": 10,
     "die_motion_mode": '', # to be filled in later - based on action file
-    "position_bottom_die_before_first_hit": '', # same for this field
+    # Axis normal to the dies. "z" preserves the original setup; "y" supports
+    # dies that close along the Y axis.
+    "die_motion_axis": "z",
+    "position_bottom_die_before_first_hit": '', # same for this field # same for this field
     "position_dies_before_first_hit": True, # always true to allow flexibility for runs
     # When true, hit 0 starts from a general key file by seating the dies on the
     # workpiece and backing them out by `height` before the first DB is written.
@@ -149,10 +162,13 @@ def apply_action_file_rules(config):
         config["position_bottom_die_before_first_hit"] = False
         
     config['tp_type'] = config['action_file'].split("_")[2]
-    if config['use_jmak']:
-        config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}_jmak"
+    if config["custom_key_bool"]:
+        config["run_name"] = f"{config["custom_key_name"][:-4]}_run{config['run_number']}_{config['num_hits']}hits"
     else:
-        config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}"
+        if config['use_jmak']:
+            config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}_jmak"
+        else:
+            config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}"
 
     return config
 
@@ -227,10 +243,11 @@ def get_init_key(config, die):
 
     key_files = config.get("key_files", {})
     die_key = str(die)
-    if die_key not in key_files:
+    if die_key not in key_files and config["custom_key_bool"] == False:
         supported = ", ".join(sorted(key_files.keys()))
         raise ValueError(f"No key file configured for die {die}. Supported dies: {supported}")
-
+    elif config["custom_key_name"]:
+        return os.path.join(resolve_path(config["key_path"], config), config["custom_key_name"])
     key_file = format_config_value(key_files[die_key], config)
     if config['use_jmak']:
         return os.path.join(resolve_path(config["key_path"], config), key_file[:-4]+"_jmak.key")
@@ -274,12 +291,9 @@ def validate_config(config, actions_df, action_path, init_key):
         raise ValueError("position_dies_before_first_hit must be true or false.")
     if not isinstance(config["position_bottom_die_before_first_hit"], bool):
         raise ValueError("position_bottom_die_before_first_hit must be true or false.")
-    for key in [
-        "export_post_hit_keys",
-        "export_coordinate_logs",
-        "export_load_stroke",
-        "post_process_after_run",
-    ]:
+    if str(config.get("die_motion_axis", "z")).lower() not in ["z", "y"]:
+        raise ValueError("die_motion_axis must be 'z' or 'y'.")
+    for key in ["export_post_hit_keys", "export_coordinate_logs", "export_load_stroke","post_process_after_run"]:
         if not isinstance(config.get(key, True), bool):
             raise ValueError(f"{key} must be true or false.")
     if int(config.get("post_process_damage_step_no", 0)) < 0:
@@ -346,24 +360,36 @@ def build_stroke_plan(stroke_start, depth, speed, height, time_step, bottom_die_
     }
 
 
-def set_symmetric_die_motion(plan, speed):
+def format_movctl_direction(die_motion_axis="z"):
+    """Return the MOVCTL direction vector in DEFORM key-string formatting."""
+    movctl_dir = get_die_motion_axis_vectors(die_motion_axis)["movctl_dir"]
+    return (
+        f"{movctl_dir[0]:.10E}    "
+        f"{movctl_dir[1]:.10E}   "
+        f"{movctl_dir[2]:.10E}"
+    ).replace("E+00", "E+000").replace("E-00", "E-000")
+
+
+def set_symmetric_die_motion(plan, speed, die_motion_axis="z"):
     """Write mirrored MOVCTL blocks for Top Die and Bottom Die.
 
     The signs intentionally oppose each other: as the top die moves toward the
     workpiece, the bottom die moves toward it from the opposite side. This is
     the anti-bending behavior and should be preserved as the default.
     """
-    defModel.importKeyString(f"""MOVCTL       2       1       2    0.0000000000E+000    0.0000000000E+000   -1.0000000000E+000       7
+    movctl_dir_text = format_movctl_direction(die_motion_axis)
+
+    defModel.importKeyString(f"""MOVCTL       2       1       2    {movctl_dir_text}       7
         {plan["stroke_start"]:.6E}    {speed:.6E}
         {plan["stroke_down_end"]:.6E}    {speed:.6E}
         {plan["mid_change"]:.6E}    0.0000000000E+000
         {plan["stroke_up_start"]:.6E}    -{speed:.6E}
         {plan["stroke_up_end"]:.6E}    -{speed:.6E}
         {plan["lag_start"]:.6E}    0.0000000000E+000
-        {plan["stroke_end"]:.6E}    0.0000000000E+000
+         {plan["stroke_end"]:.6E}    0.0000000000E+000
         """)
 
-    defModel.importKeyString(f"""MOVCTL       3       1       2    0.0000000000E+000    0.0000000000E+000   -1.0000000000E+000       7
+    defModel.importKeyString(f"""MOVCTL       3       1       2    {movctl_dir_text}       7
         {plan["stroke_start"]:.6E}    -{speed:.6E}
         {plan["stroke_down_end"]:.6E}    -{speed:.6E}
         {plan["mid_change"]:.6E}    0.0000000000E+000
@@ -374,7 +400,7 @@ def set_symmetric_die_motion(plan, speed):
         """)
 
 
-def set_single_top_die_motion(plan, speed, bottom_die_retract_speed_multiplier):
+def set_single_top_die_motion(plan, speed, bottom_die_retract_speed_multiplier, die_motion_axis="z"):
     """Write MOVCTL blocks for top-die-only forming with delayed bottom-die retract.
 
     The top die performs the normal down-up stroke. The bottom die remains still
@@ -382,8 +408,9 @@ def set_single_top_die_motion(plan, speed, bottom_die_retract_speed_multiplier):
     upper position. This matches the earlier single-die movement pattern.
     """
     speed_down = speed * bottom_die_retract_speed_multiplier
+    movctl_dir_text = format_movctl_direction(die_motion_axis)
 
-    defModel.importKeyString(f"""MOVCTL       2       1       2    0.0000000000E+000    0.0000000000E+000   -1.0000000000E+000       7
+    defModel.importKeyString(f"""MOVCTL       2       1       2    {movctl_dir_text}       7
         {plan["stroke_start"]:.6E}    {speed:.6E}
         {plan["stroke_down_end"]:.6E}    {speed:.6E}
         {plan["mid_change"]:.6E}    0.0000000000E+000
@@ -393,7 +420,7 @@ def set_single_top_die_motion(plan, speed, bottom_die_retract_speed_multiplier):
         {plan["stroke_end"]:.6E}    0.0000000000E+000
         """)
 
-    defModel.importKeyString(f"""MOVCTL       3       1       2    0.0000000000E+000    0.0000000000E+000   -1.0000000000E+000       7
+    defModel.importKeyString(f"""MOVCTL       3       1       2    {movctl_dir_text}       7
         {plan["stroke_start"]:.6E}    0.0000000000E+000
         {plan["stroke_down_end"]:.6E}    0.0000000000E+000
         {plan["mid_change"]:.6E}    0.0000000000E+000
@@ -404,28 +431,35 @@ def set_single_top_die_motion(plan, speed, bottom_die_retract_speed_multiplier):
         """)
 
 
-def set_die_motion(plan, speed, die_motion_mode, bottom_die_retract_speed_multiplier):
+def set_die_motion(plan, speed, die_motion_mode, bottom_die_retract_speed_multiplier, die_motion_axis="z"):
     """Apply the configured die-motion strategy for the current hit."""
     if die_motion_mode == "symmetric":
-        set_symmetric_die_motion(plan, speed)
+        set_symmetric_die_motion(plan, speed, die_motion_axis=die_motion_axis)
     elif die_motion_mode == "single_top_die":
-        set_single_top_die_motion(plan, speed, bottom_die_retract_speed_multiplier)
+        set_single_top_die_motion(
+            plan,
+            speed,
+            bottom_die_retract_speed_multiplier,
+            die_motion_axis=die_motion_axis,
+        )
     else:
         raise ValueError(f"Unsupported die_motion_mode: {die_motion_mode}")
 
 
-def reseat_dies(height, top_die_interference, bottom_die_interference, position_bottom_die):
+def reseat_dies(height, top_die_interference, bottom_die_interference, position_bottom_die, die_motion_axis="z"):
     """Place both dies back around the solved workpiece before the next hit.
 
     Interference positioning brings each die to the workpiece surface, then the
     symmetric offsets reopen the die gap by +/- height.
     """
+    axis_vectors = get_die_motion_axis_vectors(die_motion_axis)
     defModel.position.perform(
         "Top Die",
         PositionType.Interference,
         (
             f"interference={top_die_interference}, upStroke=false, "
-            "refObj='Workpiece', dir=(0, 0, -1), moveOut='true'"
+            f"refObj='Workpiece', "
+            f"dir={format_vector(axis_vectors['top_interference_dir'])}, moveOut='true'"
         ),
         "Top Die",
     )
@@ -435,7 +469,8 @@ def reseat_dies(height, top_die_interference, bottom_die_interference, position_
         PositionType.Interference,
         (
             f"interference={bottom_die_interference}, upStroke=false, "
-            "refObj='Workpiece', dir=(0, 0, 1), moveOut='true'"
+            f"refObj='Workpiece', "
+            f"dir={format_vector(axis_vectors['bottom_interference_dir'])}, moveOut='true'"
         ),
         "Bottom Die",
     )
@@ -443,13 +478,13 @@ def reseat_dies(height, top_die_interference, bottom_die_interference, position_
     defModel.position.perform(
         "Top Die",
         PositionType.Offset,
-        f"offset=(0,0,{height}), upStroke=false",
+        f"offset={format_vector(scale_vector(axis_vectors['top_offset'], height))}, upStroke=false",
     )
     if position_bottom_die:
         defModel.position.perform(
             "Bottom Die",
             PositionType.Offset,
-            f"offset=(0,0,-{height}), upStroke=false",
+            f"offset={format_vector(scale_vector(axis_vectors['bottom_offset'], height))}, upStroke=false",
         )
 
 
@@ -474,7 +509,7 @@ def reposition_workpiece(actions_df, columns, hit):
     )
 
 
-def print_runtime_summary(config, action_path, init_key, die, num_hits, run_name, data_path, die_motion_mode):
+def print_runtime_summary(config, action_path, init_key, die, num_hits, run_name, data_path, die_motion_mode, die_motion_axis):
     """Print the run settings most useful for checking a long DEFORM job."""
     print("Loaded DEFORM multihit configuration:")
     print(f"  Action CSV : {action_path}")
@@ -485,6 +520,7 @@ def print_runtime_summary(config, action_path, init_key, die, num_hits, run_name
     print(f"  Init key   : {init_key}")
     print(f"  Runs path  : {data_path}")
     print(f"  Die motion : {die_motion_mode}")
+    print(f"  Die axis   : {die_motion_axis}")
    
     
 def is_number_token(token):
@@ -665,8 +701,7 @@ def post_process_completed_run(config, config_path, run_root_dir):
 
     print("\n================ POST-PROCESSING RUN ================")
     try:
-        from run_deform_post_processing import process_run
-
+        print(config_path,run_root_dir)
         summary = process_run(
             config_path=config_path,
             config_override=config,
@@ -701,15 +736,19 @@ def main(config_path=None):
     time_step = float(config["time_step"])
     save_step_size = int(config["save_step_size"])
     die_motion_mode = config["die_motion_mode"]
+    die_motion_axis = str(config.get("die_motion_axis", "z")).lower()
     bottom_die_retract_speed_multiplier = float(config["bottom_die_retract_speed_multiplier"])
     bottom_die_retract_lead_steps = int(config["bottom_die_retract_lead_steps"])
     top_die_interference = float(config["top_die_interference"])
     bottom_die_interference = float(config["bottom_die_interference"])
     data_path = resolve_path(config["data_path"], config)
     run_name = format_config_value(config["run_name"], config)
-    mean_grain_size_um = float(config["mean_grain_size_um"])
-
-    print_runtime_summary(config, action_path, init_key, die, num_hits, run_name, data_path, die_motion_mode)
+    if config["use_jmak"]:
+        mean_grain_size_um = float(config["mean_grain_size_um"])
+    else:
+        mean_grain_size_um = 0 # JMAK not active
+        
+    print_runtime_summary(config, action_path, init_key, die, num_hits, run_name, data_path, die_motion_mode, die_motion_axis)
 
     stroke_start = 0
     total_steps = 0
@@ -739,7 +778,13 @@ def main(config_path=None):
                 
             # other arguments in "position_dies_before_hits" are set in 
             # die_positioning.py
-            position_dies_before_hits(height,position_bottom_die=position_bottom_die)
+            position_dies_before_hits(
+                height,
+                top_die_interference=top_die_interference,
+                bottom_die_interference=bottom_die_interference,
+                position_bottom_die=position_bottom_die,
+                die_motion_axis=die_motion_axis,
+            )
             print(f"""\tOffset = {offset_val},
               Position = {actions_df[columns["position"]].values[hit]},
               Rotation = {rot_ang}""")
@@ -790,7 +835,13 @@ def main(config_path=None):
             defModel.simCtrl.setStepSettings(
                 f'NSTART=-1, NSTEP={plan["hit_steps"]}, STPINC={save_step_size}, DTMAX={time_step}'
             )
-            set_die_motion(plan, speed, die_motion_mode, bottom_die_retract_speed_multiplier)
+            set_die_motion(
+                plan,
+                speed,
+                die_motion_mode,
+                bottom_die_retract_speed_multiplier,
+                die_motion_axis=die_motion_axis,
+            )
             stroke_start = plan["stroke_end"]
 
             # Update thermal state and reset target volume before writing the DB.
@@ -817,7 +868,13 @@ def main(config_path=None):
         if 0 < hit < num_hits:
             # Prepare geometry for the next hit from the final solved state.
             reposition_workpiece(actions_df, columns, hit)
-            reseat_dies(height, top_die_interference, bottom_die_interference, position_bottom_die)
+            reseat_dies(
+                height,
+                top_die_interference,
+                bottom_die_interference,
+                position_bottom_die,
+                die_motion_axis=die_motion_axis,
+            )
             export_hit_outputs(config, run_dir, hit, "post", write_key=True)
         elif hit > 0:
             # For the last hit, post and final are intentionally identical.
@@ -832,9 +889,7 @@ def main(config_path=None):
     post_process_completed_run(
         config=config,
         config_path=config_path,
-        run_root_dir=os.path.join(data_path, run_name),
-    )
-
+        run_root_dir=os.path.join(data_path, run_name))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run DEFORM multihit sequence.")

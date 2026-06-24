@@ -13,6 +13,46 @@ import csv
 from pathlib import Path
 
 
+def get_die_motion_axis_vectors(die_motion_axis="z"):
+    """Return DEFORM direction/offset vectors for the selected die motion axis.
+
+    `die_motion_axis="z"` preserves the original setup: top die approaches in
+    -Z and bottom die approaches in +Z. `die_motion_axis="y"` uses the same
+    convention along Y: top die approaches in -Y and bottom die approaches in
+    +Y.
+    """
+    axis = str(die_motion_axis).lower()
+    if axis == "z":
+        return {
+            "axis": "z",
+            "top_interference_dir": (0, 0, -1),
+            "bottom_interference_dir": (0, 0, 1),
+            "top_offset": (0, 0, 1),
+            "bottom_offset": (0, 0, -1),
+            "movctl_dir": (0, 0, -1),
+        }
+    if axis == "y":
+        return {
+            "axis": "y",
+            "top_interference_dir": (0, -1, 0),
+            "bottom_interference_dir": (0, 1, 0),
+            "top_offset": (0, -1, 0),
+            "bottom_offset": (0, 1, 0),
+            "movctl_dir": (0, -1, 0),
+        }
+    raise ValueError("die_motion_axis must be 'z' or 'y'.")
+
+
+def format_vector(values):
+    """Format a DEFORM tuple without Python spaces."""
+    return f"({values[0]},{values[1]},{values[2]})"
+
+
+def scale_vector(values, scale):
+    """Scale a three-component vector."""
+    return (values[0] * scale, values[1] * scale, values[2] * scale)
+
+
 def position_dies_before_hits(
     height,
     top_die_name="Top Die",
@@ -21,6 +61,7 @@ def position_dies_before_hits(
     top_die_interference=0.0001,
     bottom_die_interference=0.0001,
     position_bottom_die=True,
+    die_motion_axis="z",
 ):
     """Seat dies on the workpiece, then back them out to the starting clearance.
 
@@ -43,22 +84,27 @@ def position_dies_before_hits(
         If True, also seats and backs out the bottom die symmetrically. Set to
         False for setups where the starting key already has the bottom die fixed
         in the desired location.
+    die_motion_axis : {"z", "y"}
+        Axis used for die approach/retract. Use "z" for the original vertical
+        motion and "y" for dies that close along the Y axis.
 
     Notes
     -----
-    The top die is moved flush using `dir=(0, 0, -1)` and then backed out by
-    `+height` in Z. The bottom die, when enabled, is moved flush using
-    `dir=(0, 0, 1)` and then backed out by `-height` in Z.
+    The selected axis controls both interference directions and the back-out
+    offsets. This keeps hit-0 positioning consistent with the MOVCTL axis used
+    during the solve.
     """
     if height <= 0:
         raise ValueError("height must be greater than 0.")
+    axis_vectors = get_die_motion_axis_vectors(die_motion_axis)
 
     defModel.position.perform(
         top_die_name,
         PositionType.Interference,
         (
             f"interference={top_die_interference}, upStroke=false, "
-            f"refObj='{workpiece_name}', dir=(0, 0, -1), moveOut='true'"
+            f"refObj='{workpiece_name}', "
+            f"dir={format_vector(axis_vectors['top_interference_dir'])}, moveOut='true'"
         ),
         top_die_name,
     )
@@ -66,7 +112,7 @@ def position_dies_before_hits(
     defModel.position.perform(
         top_die_name,
         PositionType.Offset,
-        f"offset=(0,0,{height}), upStroke=false",
+        f"offset={format_vector(scale_vector(axis_vectors['top_offset'], height))}, upStroke=false",
     )
 
     if not position_bottom_die:
@@ -77,7 +123,8 @@ def position_dies_before_hits(
         PositionType.Interference,
         (
             f"interference={bottom_die_interference}, upStroke=false, "
-            f"refObj='{workpiece_name}', dir=(0, 0, 1), moveOut='true'"
+            f"refObj='{workpiece_name}', "
+            f"dir={format_vector(axis_vectors['bottom_interference_dir'])}, moveOut='true'"
         ),
         bottom_die_name,
     )
@@ -85,7 +132,7 @@ def position_dies_before_hits(
     defModel.position.perform(
         bottom_die_name,
         PositionType.Offset,
-        f"offset=(0,0,-{height}), upStroke=false",
+        f"offset={format_vector(scale_vector(axis_vectors['bottom_offset'], height))}, upStroke=false",
     )
 
 
