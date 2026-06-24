@@ -30,27 +30,29 @@ import time
 import pandas as pd
 import csv
 from grain_initialization import create_supplier_grain_size_string_from_key
-
+from run_deform_post_processing import process_run
 
 DEFAULT_CONFIG = {
     # Folder containing base key files on the lab computer.
     "key_path": r"C:\Users\bianco.33\Desktop\deform_auto_py\key_files",
+    "custom_key_bool": True,
+    "custom_key_name": "",
     # Folder containing the action CSV files on the lab computer.
     "action_path": r"C:\Users\bianco.33\Desktop\deform_auto_py\action_files",
     # CSV describing pass position, offset, rotation, temperature, speed, and depth.
     # Small die - AF_TensileBar_P1-1_deform_info_v4_rev_bdm - w/ and w/o bdm
     # Large die - AF_TensileBar_P2-2_deform_info_v6_rev_bdm - w/ and w/o bdm
-    "action_file": "AF_TensileBar_P2-2_deform_info_v5_rev.csv",
-    "action_version": "v5",
+    "action_file": "AF_TensileBar_P2-2_deform_info_v6_rev.csv",
+    "action_version": "v6",
     # When true, action filename tags such as "bdm" can set compatible defaults.
     "apply_action_file_rules": True,
     # Parent output folder. A run-specific folder is created under this path.
     "data_path": r"C:\Users\bianco.33\Desktop\deform_auto_py\runs",
     "tp_type": "", # to be filled in later
     "material": "316L", # materials supported include 316L, 4140, 4340, 15-5
-    "run_number": 2,
+    "run_number": 1,
     # Use an integer for a partial run, or set to "all" in config to use every CSV row.
-    "num_hits": 5,
+    "num_hits": 1,
     # Clearance used when re-seating dies after a hit.
     "height": 0.025,
     # DEFORM max time step for the stroke. Smaller is slower but can improve stability.
@@ -79,6 +81,12 @@ DEFAULT_CONFIG = {
     "export_coordinate_logs": True,
     "export_load_stroke": True,
     "load_stroke_object": "Top Die",
+    # When true, run_deform_post_processing.py is called after all hits finish.
+    # This creates post_processed/*.csv and run_summary.json for the completed run.
+    "post_process_after_run": True,
+    "post_process_output_subdir": "post_processed",
+    "post_process_damage_object": "Workpiece",
+    "post_process_damage_step_no": 0,
     "columns": {
         "offset": "offset_in",
         "rotation": "rotation",
@@ -143,10 +151,13 @@ def apply_action_file_rules(config):
         config["position_bottom_die_before_first_hit"] = False
         
     config['tp_type'] = config['action_file'].split("_")[2]
-    if config['use_jmak']:
-        config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}_jmak"
+    if config["custom_key_bool"]:
+        config["run_name"] = f"{config["custom_key_name"][:-4]}_run{config['run_number']}_{config['num_hits']}hits"
     else:
-        config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}"
+        if config['use_jmak']:
+            config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}_jmak"
+        else:
+            config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}"
 
     return config
 
@@ -221,10 +232,11 @@ def get_init_key(config, die):
 
     key_files = config.get("key_files", {})
     die_key = str(die)
-    if die_key not in key_files:
+    if die_key not in key_files and config["custom_key_bool"] == False:
         supported = ", ".join(sorted(key_files.keys()))
         raise ValueError(f"No key file configured for die {die}. Supported dies: {supported}")
-
+    elif config["custom_key_name"]:
+        return os.path.join(resolve_path(config["key_path"], config), config["custom_key_name"])
     key_file = format_config_value(key_files[die_key], config)
     if config['use_jmak']:
         return os.path.join(resolve_path(config["key_path"], config), key_file[:-4]+"_jmak.key")
@@ -268,9 +280,11 @@ def validate_config(config, actions_df, action_path, init_key):
         raise ValueError("position_dies_before_first_hit must be true or false.")
     if not isinstance(config["position_bottom_die_before_first_hit"], bool):
         raise ValueError("position_bottom_die_before_first_hit must be true or false.")
-    for key in ["export_post_hit_keys", "export_coordinate_logs", "export_load_stroke"]:
+    for key in ["export_post_hit_keys", "export_coordinate_logs", "export_load_stroke","post_process_after_run"]:
         if not isinstance(config.get(key, True), bool):
             raise ValueError(f"{key} must be true or false.")
+    if int(config.get("post_process_damage_step_no", 0)) < 0:
+        raise ValueError("post_process_damage_step_no must be zero or greater.")
 
 
 def celsius_to_fahrenheit(temp_c):
@@ -639,6 +653,34 @@ def export_hit_outputs(config, run_dir, hit, stage, write_key=True):
     return ""
 
 
+def post_process_completed_run(config, config_path, run_root_dir):
+    """Run the standalone post-processor after a successful multihit run.
+
+    Post-processing is useful but should not erase the fact that DEFORM solved
+    successfully. Any post-processing exception is reported as a warning and the
+    runner exits normally.
+    """
+    if not config.get("post_process_after_run", True):
+        print("\nPost-processing skipped: post_process_after_run is false.")
+        return
+
+    print("\n================ POST-PROCESSING RUN ================")
+    try:
+
+        summary = process_run(
+            config_path=config_path,
+            run_dir=run_root_dir,
+            output_subdir=config.get("post_process_output_subdir", "post_processed"),
+            damage_object=config.get("post_process_damage_object", "Workpiece"),
+            damage_step_no=int(config.get("post_process_damage_step_no", 0)),
+        )
+        print("Post-processing finished successfully.")
+        summary_json = os.path.join(summary.get("output_dir", ""), "run_summary.json")
+        print(f"  Summary JSON: {summary_json}")
+    except Exception as exc:
+        print(f"WARNING: Post-processing failed after the DEFORM run completed: {exc}")
+
+
 def main(config_path=None):
     """Load inputs, generate each hit database, run it, and prepare the next hit."""
     config = load_config(config_path)
@@ -664,8 +706,11 @@ def main(config_path=None):
     bottom_die_interference = float(config["bottom_die_interference"])
     data_path = resolve_path(config["data_path"], config)
     run_name = format_config_value(config["run_name"], config)
-    mean_grain_size_um = float(config["mean_grain_size_um"])
-
+    if config["use_jmak"]:
+        mean_grain_size_um = float(config["mean_grain_size_um"])
+    else:
+        mean_grain_size_um = 0 # JMAK not active
+        
     print_runtime_summary(config, action_path, init_key, die, num_hits, run_name, data_path, die_motion_mode)
 
     stroke_start = 0
@@ -786,7 +831,10 @@ def main(config_path=None):
             defModel.writeKey(os.path.join(next_hit_dir, f"af-hit-{hit + 1}.KEY"))
             
     print("\n================ DONE: ALL HITS COMPLETE ================")
-
+    post_process_completed_run(
+        config=config,
+        config_path=config_path,
+        run_root_dir=os.path.join(data_path, run_name))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run DEFORM multihit sequence.")

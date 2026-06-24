@@ -60,11 +60,6 @@ learning approaches.
     summaries, and discovered result CSV paths.
   - Updates the manifest and builds `dataset.csv`.
 
-- `visualize_doe_results.py`
-  - Reads `dataset.csv`, `manifest.csv`, `candidates_next.csv`, and
-    `surrogate_report.json`.
-  - Writes refreshed plots and an HTML report under `report/`.
-
 ## Recommended Study Loop
 
 ### 1. Define Input Bounds
@@ -120,48 +115,6 @@ PROPOSE_NEXT_CANDIDATES = True
 
 This writes `dataset.csv`, `surrogate_report.json`, and `candidates_next.csv`
 under the study folder.
-
-To refresh plots and the HTML report from `run_initial_doe.py`, set:
-
-```python
-MAKE_REPORT = True
-```
-
-You can also run the reporting script directly:
-
-```powershell
-python visualize_doe_results.py `
-  --study-root "optimization/single_die_5hit_initial_doe"
-```
-
-or from Spyder:
-
-```python
-from visualize_doe_results import visualize_doe_results
-
-visualize_doe_results(
-    study_root=r"C:\Users\bianco.33\Desktop\deform_auto_py\optimization\single_die_5hit_initial_doe"
-)
-```
-
-To prepare the proposed candidate batch from `candidates_next.csv`:
-
-```python
-RUN_NEXT_CANDIDATES = True
-EXECUTE_NEXT_CANDIDATES = False
-```
-
-After inspecting the generated next-round configs/actions:
-
-```python
-RUN_NEXT_CANDIDATES = True
-EXECUTE_NEXT_CANDIDATES = True
-```
-
-The launcher is not an infinite loop. It stops after one proposed-candidate
-batch. `NEXT_ROUND_NUMBER` and `MAX_ROUND_NUMBER` are guardrails so the script
-cannot accidentally continue into additional rounds unless you explicitly edit
-those settings.
 
 The lower-level manual candidate generation workflow is:
 

@@ -21,13 +21,13 @@ the DEFORM Python API on the path.
 import argparse
 import json
 from pathlib import Path
-
 import pandas as pd
-
 from dataset_builder import build_dataset_from_manifest
 from metrics import summarize_damage
 from microstructure_post_processing import save_microstructure_csv_from_key
 from run_manifest import load_manifest
+from optimizers.bayesian import propose_bayesian_candidates
+from surrogate_model import save_training_report, train_surrogate
 
 
 RESULT_COLUMNS = [
@@ -453,6 +453,7 @@ def process_doe_results(
         manifest_path=manifest_path,
         output_csv_path=dataset_path,
         objective_weights=objective_weights,
+        statuses=statuses,
     )
 
     return {
@@ -474,12 +475,23 @@ def train_and_propose_next(
     random_seed=1,
 ):
     """Optionally train a surrogate and write next Bayesian candidates."""
-    from optimizers.bayesian import propose_bayesian_candidates
-    from surrogate_model import save_training_report, train_surrogate
+
+    dataset = pd.read_csv(dataset_path)
+    feature_columns = [column for column in bounds.keys() if column in dataset.columns]
+    missing_features = [column for column in bounds.keys() if column not in dataset.columns]
+    if missing_features:
+        raise ValueError(
+            "Dataset is missing bounded input feature columns: "
+            + ", ".join(missing_features)
+            + ". Rebuild dataset.csv with the updated dataset_builder.py."
+        )
+    if not feature_columns:
+        raise ValueError("No bounded input feature columns were found for surrogate training.")
 
     model, report = train_surrogate(
         dataset_csv_path=dataset_path,
         target_column=target_column,
+        feature_columns=feature_columns,
         model_type=model_type,
         random_state=random_seed,
     )

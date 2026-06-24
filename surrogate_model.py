@@ -8,7 +8,6 @@ Bayesian optimization because they provide uncertainty estimates.
 
 import json
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
@@ -117,6 +116,10 @@ def train_surrogate(
 
     if feature_columns is None:
         feature_columns = infer_feature_columns(df, target_column, exclude_columns=exclude_columns)
+
+    missing_features = [column for column in feature_columns if column not in df.columns]
+    if missing_features:
+        raise ValueError("Training feature columns are missing: " + ", ".join(missing_features))
 
     x = df[feature_columns]
     y = pd.to_numeric(df[target_column], errors="coerce")

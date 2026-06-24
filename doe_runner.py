@@ -355,7 +355,7 @@ def main():
     parser.add_argument(
         "--runner-script",
         default=DEFAULT_RUNNER_SCRIPT,
-        help="Path to run_deform_hits_v3_improved.py.",
+        help="Path to run_deform_hits_config.py.",
     )
     parser.add_argument(
         "--apply-mode",

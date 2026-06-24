@@ -7,9 +7,7 @@ and measured outputs/objectives in the same table.
 
 import json
 from pathlib import Path
-
 import pandas as pd
-
 from metrics import collect_metrics_from_files, weighted_objective
 from run_manifest import load_manifest
 
@@ -33,13 +31,42 @@ def parse_metadata_json(value):
     return json.loads(value)
 
 
+def add_plain_candidate_features(row, metadata):
+    """Copy candidate/input metadata into plain feature columns.
+
+    The manifest keeps candidate values in nested JSON, which becomes columns
+    like `meta_candidate_depth_in` after flattening. Surrogate prediction uses
+    proposed-candidate tables with plain columns such as `depth_in`, so the
+    completed dataset needs those same plain feature names.
+    """
+    prefixes = [
+        "candidate_",
+        "applied_action_values_",
+        "applied_config_values_",
+    ]
+
+    for key, value in metadata.items():
+        for prefix in prefixes:
+            if key.startswith(prefix):
+                feature_name = key[len(prefix):]
+                if feature_name and feature_name not in row:
+                    row[feature_name] = value
+                break
+
+    return row
+
+
 def build_dataset_from_manifest(
     manifest_path,
     output_csv_path,
     metric_file_columns=None,
     objective_weights=None,
+    statuses=("completed",),
 ):
     """Build a dataset from manifest rows plus optional metric files.
+
+    By default, only completed manifest rows are included. Planned/running/failed
+    rows do not have reliable output metrics and should not train the surrogate.
 
     `metric_file_columns` maps metric source names to manifest columns:
 
@@ -61,11 +88,18 @@ def build_dataset_from_manifest(
         }
 
     manifest = load_manifest(manifest_path)
+    if statuses:
+        status_set = {str(status).lower() for status in statuses}
+        manifest = manifest[
+            manifest.get("status", "").fillna("").astype(str).str.lower().isin(status_set)
+        ].copy()
+
     rows = []
 
     for _, manifest_row in manifest.iterrows():
         row = manifest_row.to_dict()
         metadata = flatten_dict(parse_metadata_json(row.get("metadata_json")))
+        row = add_plain_candidate_features(row, metadata)
         row.update({f"meta_{key}": value for key, value in metadata.items()})
 
         metric_inputs = {}
