@@ -36,6 +36,7 @@ import time
 import pandas as pd
 import csv
 from grain_initialization import create_supplier_grain_size_string_from_key
+from material_management import apply_material_from_config
 from run_deform_post_processing import process_run
 
 USER_PATH = os.path.expanduser('~')
@@ -58,6 +59,14 @@ DEFAULT_CONFIG = {
     "data_path": os.path.join(USER_PATH,r"Desktop\deform_auto_py\runs"),
     "tp_type": "", # to be filled in later
     "material": "316L", # materials supported include 316L, 4140, 4340, 15-5
+    # Optional programmatic DEFORM material replacement after the starting key is read.
+    "change_material": False,
+    "material_source": "system_library",
+    "deform_material_name": "",
+    "material_object_name": "Workpiece",
+    "system_material_library_dir": r"C:\Program Files\SFTC\DEFORM\v14.0\MaterialLibrary\Standard",
+    "user_material_library_dir": "",
+    "material_number": None,
     "run_number": 2,
     # Use an integer for a partial run, or set to "all" in config to use every CSV row.
     "num_hits": 1,
@@ -293,6 +302,14 @@ def validate_config(config, actions_df, action_path, init_key):
         raise ValueError("position_bottom_die_before_first_hit must be true or false.")
     if str(config.get("die_motion_axis", "z")).lower() not in ["z", "y"]:
         raise ValueError("die_motion_axis must be 'z' or 'y'.")
+    if not isinstance(config.get("change_material", False), bool):
+        raise ValueError("change_material must be true or false.")
+    if config.get("change_material", False):
+        material_source = str(config.get("material_source", "system_library")).lower()
+        if material_source not in ["system_library", "user_library", "key", "db", "assign"]:
+            raise ValueError("material_source must be system_library, user_library, key, db, or assign.")
+        if material_source != "assign" and not (config.get("deform_material_name") or config.get("material")):
+            raise ValueError("deform_material_name or material is required when change_material is true.")
     for key in ["export_post_hit_keys", "export_coordinate_logs", "export_load_stroke","post_process_after_run"]:
         if not isinstance(config.get(key, True), bool):
             raise ValueError(f"{key} must be true or false.")
@@ -763,6 +780,15 @@ def main(config_path=None):
         if hit == 0:
             print("Reading base keyfile......")
             defModel.readKey(init_key)
+
+            material_update = apply_material_from_config(config)
+            if material_update:
+                print(
+                    "Applied material change: "
+                    f"{material_update.get('object_name')} -> "
+                    f"{material_update.get('material_name', material_update.get('material_number'))} "
+                    f"({material_update.get('material_source')})"
+                )
             
             # Update initial grain size 
             if config["use_jmak"]:

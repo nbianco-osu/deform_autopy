@@ -88,6 +88,9 @@ config file. Important config fields include:
   "action_file": "AF_TensileBar_P2-2_deform_info_v5_rev.csv",
   "data_path": "C:\\path\\to\\runs",
   "material": "316L",
+  "change_material": false,
+  "material_source": "system_library",
+  "deform_material_name": "",
   "run_number": 1,
   "num_hits": 5,
   "height": 0.025,
@@ -156,6 +159,31 @@ To skip automatic post-processing:
 "post_process_after_run": false
 ```
 
+### Programmatic Material Changes
+
+`material_management.py` can replace or assign the workpiece material after the
+starting key is read and before hit 0 is written.
+
+Typical system-library replacement:
+
+```json
+{
+  "change_material": true,
+  "material_source": "system_library",
+  "deform_material_name": "AISI-1045",
+  "material_object_name": "Workpiece",
+  "system_material_library_dir": "C:\\Program Files\\SFTC\\DEFORM\\v14.0\\MaterialLibrary\\Standard"
+}
+```
+
+Supported `material_source` values:
+
+- `"system_library"` uses `DeformMaterial.importLib(...)`.
+- `"user_library"` uses `DeformMaterial.importUsrLib(...)`.
+- `"key"` uses `DeformMaterial.importKey(...)`.
+- `"db"` uses `DeformMaterial.importDB(...)`.
+- `"assign"` uses `DeformObject.assignMat(...)` or `assignMatByNo(...)`.
+
 ## Running a Multihit Job
 
 In Spyder:
@@ -216,6 +244,9 @@ with files such as:
 
 - `grain_initialization.py`
   - Builds JMAK grain-size initialization key strings.
+
+- `material_management.py`
+  - Programmatically changes or assigns DEFORM materials from config.
 
 - `lag_time.py`
   - Experimental lag-time and adaptive timing helpers.
