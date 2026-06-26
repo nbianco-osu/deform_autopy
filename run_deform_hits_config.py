@@ -44,30 +44,32 @@ USER_PATH = os.path.expanduser('~')
 DEFAULT_CONFIG = {
     # Folder containing base key files on the lab computer.
     "key_path": os.path.join(USER_PATH,r"Desktop\deform_auto_py\key_files"),
-    "custom_key_bool": True,
-    "custom_key_name": "agility_forge_die2_1in_stock_IN625mat_coarse_rev.key",
+    "custom_key_bool": False,
+    "custom_key_name": "",
     # Folder containing the action CSV files on the lab computer.
     "action_path": os.path.join(USER_PATH,r"Desktop\deform_auto_py\action_files"),
     # CSV describing pass position, offset, rotation, temperature, speed, and depth.
     # Small die - AF_TensileBar_P1-1_deform_info_v4_rev_bdm - w/ and w/o bdm
     # Large die - AF_TensileBar_P2-2_deform_info_v6_rev_bdm - w/ and w/o bdm
-    "action_file": "AF_TensileBar_P2-2_deform_info_v6_rev.csv",
-    "action_version": "v6",
+    "action_file": "AF_TensileBar_P1-1_deform_info_v4_rev.csv",
+    "action_version": "v4",
     # When true, action filename tags such as "bdm" can set compatible defaults.
     "apply_action_file_rules": True,
     # Parent output folder. A run-specific folder is created under this path.
     "data_path": os.path.join(USER_PATH,r"Desktop\deform_auto_py\runs"),
     "tp_type": "", # to be filled in later
-    "change_material": False,
+    "change_material": True, # Set to true unless using custom key
     "material_source": "system_library",
-    # TODO: add deform material name and create base key files
-    "deform_material_name": "",
+    # Some DEFORM material names - others can be ouput from list_materials.py
+    # 'AISI-4140[70-2200F(20-1200C)]', 'AISI-4340[1550-2200F(850-1200C)]'
+    # 'AISI-316L[1650-2000F(900-1100C)]', '15-5-stainless[1550-2200F(850-1200C)]'
+    "deform_material_name": "AISI-316L[1650-2000F(900-1100C)]",
     "material": "316L", # shortend name to save runs as
     "material_object_name": "Workpiece",
-    "system_material_library_dir": r"C:\Program Files\SFTC\DEFORM\v14.0\MaterialLibrary\Standard",
+    "system_material_library_dir": r"C:\Program Files\SFTC\DEFORM\v14.1.1\MaterialLibrary\Standard",
     "user_material_library_dir": "",
     "material_number": None,
-    "run_number": 2,
+    "run_number": 1,
     # Use an integer for a partial run, or set to "all" in config to use every CSV row.
     "num_hits": 1,
     # Clearance used when re-seating dies after a hit.
@@ -119,8 +121,8 @@ DEFAULT_CONFIG = {
         "depth": "depth_in"
     },
     "key_files": {
-        "2": "agility_forge_die2_{stock_diameter}in_stock_base_{mesh_type}_rev.key",
-        "4": "agility_forge_die4_{stock_diameter}in_stock_base_{mesh_type}_rev.key"
+        "2": "agility_forge_die2_{stock_diameter}in_stock_base_{mesh_type}_rev_{die_motion_axis}.key",
+        "4": "agility_forge_die4_{stock_diameter}in_stock_base_{mesh_type}_rev_{die_motion_axis}.key"
     }
 }
 
@@ -178,9 +180,9 @@ def apply_action_file_rules(config):
         config["run_name"] = f"{config["custom_key_name"][:-4]}_run{config['run_number']}_{config['num_hits']}hits"
     else:
         if config['use_jmak']:
-            config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}_jmak"
+            config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}_{config['die_motion_mode']}_jmak"
         else:
-            config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}"
+            config['run_name'] = f"af_{config['tp_type']}_{config['material']}_rev_{config['action_version']}_run{config['run_number']}_{config['num_hits']}hits_{config['die_motion_mode']}_{config['die_motion_axis']}"
 
     return config
 
@@ -198,6 +200,7 @@ def format_config_value(value, config):
         num_hits=config.get("num_hits", ""),
         height=config.get("height", ""),
         die=config.get("die", ""),
+        die_motion_axis=config.get("die_motion_axis", ""),
         mesh_type=config.get("mesh_type", ""),
         stock_diameter=config.get("stock_diameter", "")
     )
@@ -815,15 +818,16 @@ def main(config_path=None):
         if hit == 0:
             print("Reading base keyfile......")
             defModel.readKey(init_key)
-
-            material_update = apply_material_from_config(config)
-            if material_update:
-                print(
-                    "Applied material change: "
-                    f"{material_update.get('object_name')} -> "
-                    f"{material_update.get('material_name', material_update.get('material_number'))} "
-                    f"({material_update.get('material_source')})"
-                )
+            
+            if config["change_material"]:
+                material_update = apply_material_from_config(config)
+                if material_update:
+                    print(
+                        "Applied material change: "
+                        f"{material_update.get('object_name')} -> "
+                        f"{material_update.get('material_name', material_update.get('material_number'))} "
+                        f"({material_update.get('material_source')})"
+                    )
             
             # Enable DEFORM grain simulation mode and update initial grain size.
             if config["use_jmak"]:
