@@ -94,6 +94,9 @@ DEFAULT_CONFIG = {
     #TODO: update stock diameters to support other diameters only
     "stock_diameter": 0.625, # supports 0.625in only 
     "use_jmak": True, # 316L is the only alloy with grain data
+    # DEFORM simulation modes passed to defModel.simCtrl.setSimModes when JMAK
+    # is enabled. "G" is added automatically if it is missing.
+    "jmak_simulation_modes": "D H G",
     "mean_grain_size_um": 26.3,
     "enable_lag_time": False, # TODO: update to support lag time between hits and heats
     # Output controls used by DOE/result-processing workflows.
@@ -321,6 +324,38 @@ def celsius_to_fahrenheit(temp_c):
     """DEFORM key strings in this workflow expect temperature in Fahrenheit."""
     temp_f = (9 / 5) * temp_c + 32
     return f"{temp_f:.10E}"
+
+
+def normalize_simulation_modes(simulation_modes):
+    """Return a de-duplicated DEFORM simulation-mode string."""
+    modes = []
+    for mode in str(simulation_modes).replace(",", " ").split():
+        mode = mode.strip().upper()
+        if mode and mode not in modes:
+            modes.append(mode)
+    return " ".join(modes)
+
+
+def enable_grain_simulation_if_needed(config):
+    """Enable DEFORM grain simulation mode when JMAK is active.
+
+    DEFORM uses `defModel.simCtrl.setSimModes(...)` for the TRANS simulation
+    modes. The API manual lists `G` as the grain mode, so JMAK runs must include
+    it before the DB is written.
+    """
+    if not config.get("use_jmak", False):
+        return None
+
+    simulation_modes = normalize_simulation_modes(
+        config.get("jmak_simulation_modes", "D H G")
+    )
+    modes = simulation_modes.split()
+    if "G" not in modes:
+        modes.append("G")
+    simulation_modes = " ".join(modes)
+
+    defModel.simCtrl.setSimModes(simulation_modes)
+    return simulation_modes
 
 
 def run_job():
@@ -790,8 +825,10 @@ def main(config_path=None):
                     f"({material_update.get('material_source')})"
                 )
             
-            # Update initial grain size 
+            # Enable DEFORM grain simulation mode and update initial grain size.
             if config["use_jmak"]:
+                simulation_modes = enable_grain_simulation_if_needed(config)
+                print(f"Enabled JMAK/grain simulation modes: {simulation_modes}")
                 defModel.importKeyString(create_supplier_grain_size_string_from_key(init_key, mean_grain_size_um))
             
             offset_val = -1 * actions_df[columns["offset"]].values[hit]
