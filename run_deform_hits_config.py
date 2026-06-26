@@ -58,11 +58,11 @@ DEFAULT_CONFIG = {
     # Parent output folder. A run-specific folder is created under this path.
     "data_path": os.path.join(USER_PATH,r"Desktop\deform_auto_py\runs"),
     "tp_type": "", # to be filled in later
-    "material": "316L", # materials supported include 316L, 4140, 4340, 15-5
-    # Optional programmatic DEFORM material replacement after the starting key is read.
     "change_material": False,
     "material_source": "system_library",
+    # TODO: add deform material name and create base key files
     "deform_material_name": "",
+    "material": "316L", # shortend name to save runs as
     "material_object_name": "Workpiece",
     "system_material_library_dir": r"C:\Program Files\SFTC\DEFORM\v14.0\MaterialLibrary\Standard",
     "user_material_library_dir": "",
@@ -119,8 +119,8 @@ DEFAULT_CONFIG = {
         "depth": "depth_in"
     },
     "key_files": {
-        "2": "agility_forge_die2_{stock_diameter}in_stock_{material}mat_{mesh_type}_rev.key",
-        "4": "agility_forge_die4_{stock_diameter}in_stock_{material}mat_{mesh_type}_rev.key"
+        "2": "agility_forge_die2_{stock_diameter}in_stock_base_{mesh_type}_rev.key",
+        "4": "agility_forge_die4_{stock_diameter}in_stock_base_{mesh_type}_rev.key"
     }
 }
 
@@ -255,15 +255,14 @@ def get_init_key(config, die):
 
     key_files = config.get("key_files", {})
     die_key = str(die)
+    
     if die_key not in key_files and config["custom_key_bool"] == False:
         supported = ", ".join(sorted(key_files.keys()))
         raise ValueError(f"No key file configured for die {die}. Supported dies: {supported}")
     elif config["custom_key_name"]:
         return os.path.join(resolve_path(config["key_path"], config), config["custom_key_name"])
-    key_file = format_config_value(key_files[die_key], config)
-    if config['use_jmak']:
-        return os.path.join(resolve_path(config["key_path"], config), key_file[:-4]+"_jmak.key")
     else:
+        key_file = format_config_value(key_files[die_key], config)
         return os.path.join(resolve_path(config["key_path"], config), key_file)
 
 
@@ -795,6 +794,7 @@ def main(config_path=None):
     bottom_die_interference = float(config["bottom_die_interference"])
     data_path = resolve_path(config["data_path"], config)
     run_name = format_config_value(config["run_name"], config)
+    
     if config["use_jmak"]:
         mean_grain_size_um = float(config["mean_grain_size_um"])
     else:
