@@ -356,7 +356,6 @@ def enable_grain_simulation_if_needed(config):
         modes.append("G")
     simulation_modes = " ".join(modes)
 
-    defModel.simCtrl.setSimModes(simulation_modes)
     return simulation_modes
 
 
@@ -832,6 +831,7 @@ def main(config_path=None):
             # Enable DEFORM grain simulation mode and update initial grain size.
             if config["use_jmak"]:
                 simulation_modes = enable_grain_simulation_if_needed(config)
+                defModel.simCtrl.setSimModes(simulation_modes)
                 print(f"Enabled JMAK/grain simulation modes: {simulation_modes}")
                 defModel.importKeyString(create_supplier_grain_size_string_from_key(init_key, mean_grain_size_um))
             
