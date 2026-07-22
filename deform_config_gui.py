@@ -396,6 +396,14 @@ class DeformConfigGui(tk.Tk):
         notebook.add(outer, text=name)
         return inner
 
+    def create_fixed_tab(self, notebook, name):
+        """Create a notebook tab without a page-level scrollbar."""
+        outer = ttk.Frame(notebook, padding=18, style="Card.TFrame")
+        outer.columnconfigure(1, weight=1)
+        outer.rowconfigure(3, weight=1)
+        notebook.add(outer, text=name)
+        return outer
+
     def build_ui(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
@@ -435,7 +443,10 @@ class DeformConfigGui(tk.Tk):
             "Run": "Launch",
         }
         for index, name in enumerate(tab_names):
-            self.tabs[name] = self.create_scrollable_tab(body, name)
+            if name in {"Paths", "Run"}:
+                self.tabs[name] = self.create_fixed_tab(body, name)
+            else:
+                self.tabs[name] = self.create_scrollable_tab(body, name)
             button = tk.Button(
                 step_nav,
                 text=nav_labels.get(name, name),
