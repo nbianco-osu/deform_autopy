@@ -569,17 +569,27 @@ class DeformConfigGui(tk.Tk):
         self.add_field("Material/JMAK", "JMAK simulation modes", "jmak_simulation_modes", 10, kind="combo", options=["D H G", "D H"])
         self.fields["use_jmak"].widget.bind("<<ComboboxSelected>>", self.update_jmak_simulation_modes)
         self.fields["jmak_simulation_modes"].widget.configure(state="readonly")
-        self.update_jmak_simulation_modes()
         self.add_field("Material/JMAK", "Mean grain size, um", "mean_grain_size_um", 11)
+        self.update_jmak_simulation_modes()
         self.add_field("Material/JMAK", "Enable lag time", "enable_lag_time", 12, kind="combo_bool", options=BOOLEAN_OPTIONS)
 
     def update_jmak_simulation_modes(self, _event=None):
-        """Populate simulation modes from the Use JMAK GUI choice."""
+        """Populate simulation modes and grain-size input from the Use JMAK choice."""
         if "use_jmak" not in self.fields or "jmak_simulation_modes" not in self.fields:
             return
-        config = {"use_jmak": self.fields["use_jmak"].get_value()}
+        use_jmak = self.fields["use_jmak"].get_value()
+        config = {"use_jmak": use_jmak}
         set_simulation_modes_from_jmak(config)
         self.fields["jmak_simulation_modes"].set_value(config["jmak_simulation_modes"])
+
+        if "mean_grain_size_um" in self.fields:
+            grain_field = self.fields["mean_grain_size_um"]
+            if use_jmak:
+                if str(grain_field.var.get()).strip() in {"", "None"}:
+                    grain_field.set_value(self.default_config.get("mean_grain_size_um", ""))
+            else:
+                grain_field.var.set("")
+
         if _event is not None:
             self.status_var.set(f"JMAK simulation modes set to {config['jmak_simulation_modes']}.")
 
