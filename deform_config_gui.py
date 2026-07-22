@@ -8,6 +8,7 @@ source and writes an external JSON config that the runner already supports.
 """
 
 import ast
+import csv
 import json
 import os
 from pathlib import Path
@@ -26,6 +27,7 @@ VISUALIZE_DOE_PATH = APP_DIR / "visualize_doe_results.py"
 ACTION_CREATOR_PATH = APP_DIR / "action_file_creator.py"
 CONFIG_DIR = APP_DIR / "configs"
 LOCAL_ACTION_FILES_DIR = APP_DIR / "action_files"
+MATERIAL_LIST_PATH = APP_DIR / "material_list_deform.csv"
 
 
 MATERIAL_OPTIONS = [
@@ -55,7 +57,6 @@ COLOR_ACCENT_DARK = "#0ea5e9"
 COLOR_SUCCESS = "#34d399"
 COLOR_LOG_BG = "#020617"
 COLOR_LOG_FG = "#dbeafe"
-
 
 def safe_eval_default_config_node(node, names):
     """Evaluate the subset of Python syntax used by DEFAULT_CONFIG."""
@@ -154,6 +155,43 @@ def parse_number_or_text(value):
         return text
 
 
+def short_material_label(material_name):
+    """Create a compact run-label-friendly material name."""
+    label = str(material_name).strip()
+    for suffix in ["_e", "_s"]:
+        marker_index = label.rfind(suffix)
+        if marker_index > 0 and label[marker_index + 2 :].isdigit():
+            label = label[:marker_index]
+            break
+    for separator in ["[", ",", "("]:
+        if separator in label:
+            label = label.split(separator, 1)[0]
+    return label.strip().replace(" ", "_") or str(material_name).strip()
+
+
+def load_material_catalog(csv_path=MATERIAL_LIST_PATH):
+    """Load DEFORM material names grouped by material type.
+
+    The CSV stores material names without the trailing .KEY extension, which is
+    the value expected by the existing material-management workflow.
+    """
+    catalog = {}
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        return catalog
+
+    with csv_path.open("r", newline="", encoding="utf-8-sig") as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            material_type = str(row.get("Material Type", "")).strip()
+            material = str(row.get("Material", "")).strip()
+            if not material_type or not material:
+                continue
+            catalog.setdefault(material_type, []).append(material)
+
+    return {key: sorted(set(values)) for key, values in sorted(catalog.items())}
+
+
 class ConfigField:
     """Small wrapper around one editable config field."""
 
@@ -218,6 +256,8 @@ class DeformConfigGui(tk.Tk):
         self.default_config = load_default_config_from_runner()
         if LOCAL_ACTION_FILES_DIR.exists():
             self.default_config["action_path"] = str(LOCAL_ACTION_FILES_DIR)
+        self.material_catalog = load_material_catalog()
+        self.material_type_var = tk.StringVar(value="")
         self.fields = {}
         self.column_fields = {}
         self.key_file_fields = {}
@@ -248,7 +288,7 @@ class DeformConfigGui(tk.Tk):
         self.current_plot_raw = None
         self.current_plot_image = None
 
-        self.af_base_path = tk.StringVar(value=str(Path.home() / "OneDrive" / "Desktop" / "OSU Research" / "AF Data"))
+        self.af_base_path = tk.StringVar(value=str(Path.home() / "Desktop" / "OSU Research" / "AF Data"))
         self.af_hit_folders = tk.StringVar(value="Box")
         self.af_output_dir = tk.StringVar(value=str(LOCAL_ACTION_FILES_DIR))
         self.af_output_prefix = tk.StringVar(value="af")
@@ -438,18 +478,94 @@ class DeformConfigGui(tk.Tk):
         )
 
     def build_material_tab(self):
+        material_types = list(self.material_catalog.keys())
+        current_material = str(self.default_config.get("deform_material_name", ""))
+        current_type = self.find_material_type(current_material)
+        if not current_type and material_types:
+            current_type = material_types[0]
+        self.material_type_var.set(current_type)
+
         self.add_field("Material/JMAK", "Change material", "change_material", 0, kind="combo_bool", options=BOOLEAN_OPTIONS)
         self.add_field("Material/JMAK", "Material source", "material_source", 1, kind="combo", options=MATERIAL_SOURCE_OPTIONS)
-        self.add_field("Material/JMAK", "DEFORM material name", "deform_material_name", 2, kind="combo", options=MATERIAL_OPTIONS)
-        self.add_field("Material/JMAK", "Short material label", "material", 3, kind="combo", options=SHORT_MATERIAL_OPTIONS)
-        self.add_field("Material/JMAK", "Material object name", "material_object_name", 4)
-        self.add_field("Material/JMAK", "System material library", "system_material_library_dir", 5, browse="directory")
-        self.add_field("Material/JMAK", "User material library", "user_material_library_dir", 6, browse="directory")
-        self.add_field("Material/JMAK", "Material number", "material_number", 7)
-        self.add_field("Material/JMAK", "Use JMAK", "use_jmak", 8, kind="combo_bool", options=BOOLEAN_OPTIONS)
-        self.add_field("Material/JMAK", "JMAK simulation modes", "jmak_simulation_modes", 9, kind="combo", options=["D H G", "D G", "D H T G"])
-        self.add_field("Material/JMAK", "Mean grain size, um", "mean_grain_size_um", 10)
-        self.add_field("Material/JMAK", "Enable lag time", "enable_lag_time", 11, kind="combo_bool", options=BOOLEAN_OPTIONS)
+
+        ttk.Label(self.tabs["Material/JMAK"], text="Material type", style="Muted.TLabel").grid(row=2, column=0, sticky="w", padx=(12, 12), pady=7)
+        self.material_type_combo = ttk.Combobox(
+            self.tabs["Material/JMAK"],
+            textvariable=self.material_type_var,
+            values=material_types,
+            width=52,
+        )
+        self.material_type_combo.grid(row=2, column=1, sticky="ew", padx=6, pady=6)
+        self.material_type_combo.bind("<<ComboboxSelected>>", self.on_material_type_changed)
+
+        material_options = self.material_catalog.get(current_type, MATERIAL_OPTIONS)
+        self.add_field("Material/JMAK", "DEFORM material name", "deform_material_name", 3, kind="combo", options=material_options)
+        self.fields["deform_material_name"].widget.bind("<<ComboboxSelected>>", self.refresh_short_material_labels)
+        resolved_material = self.resolve_material_name(current_material, current_type)
+        if resolved_material:
+            self.fields["deform_material_name"].set_value(resolved_material)
+
+        self.add_field("Material/JMAK", "Short material label", "material", 4, kind="combo", options=SHORT_MATERIAL_OPTIONS)
+        self.refresh_short_material_labels()
+        self.add_field("Material/JMAK", "Material object name", "material_object_name", 5)
+        self.add_field("Material/JMAK", "System material library", "system_material_library_dir", 6, browse="directory")
+        self.add_field("Material/JMAK", "User material library", "user_material_library_dir", 7, browse="directory")
+        self.add_field("Material/JMAK", "Material number", "material_number", 8)
+        self.add_field("Material/JMAK", "Use JMAK", "use_jmak", 9, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_field("Material/JMAK", "JMAK simulation modes", "jmak_simulation_modes", 10, kind="combo", options=["D H G", "D G", "D H T G"])
+        self.add_field("Material/JMAK", "Mean grain size, um", "mean_grain_size_um", 11)
+        self.add_field("Material/JMAK", "Enable lag time", "enable_lag_time", 12, kind="combo_bool", options=BOOLEAN_OPTIONS)
+
+    def find_material_type(self, material_name):
+        """Return the material type containing material_name, if known."""
+        material_name = str(material_name).strip()
+        for material_type, materials in self.material_catalog.items():
+            if material_name in materials:
+                return material_type
+            if material_name:
+                for material in materials:
+                    if material.startswith(material_name):
+                        return material_type
+        return ""
+
+    def resolve_material_name(self, material_name, material_type):
+        """Return a valid material name from the selected material type."""
+        material_name = str(material_name).strip()
+        materials = self.material_catalog.get(material_type, [])
+        if material_name in materials:
+            return material_name
+        if material_name:
+            for material in materials:
+                if material.startswith(material_name):
+                    return material
+        return materials[0] if materials else material_name
+
+    def on_material_type_changed(self, _event=None):
+        """Populate material choices from the selected material type."""
+        material_type = self.material_type_var.get()
+        materials = self.material_catalog.get(material_type, [])
+        if "deform_material_name" not in self.fields:
+            return
+        material_field = self.fields["deform_material_name"]
+        material_field.widget.configure(values=materials)
+        if materials and material_field.var.get() not in materials:
+            material_field.set_value(materials[0])
+        self.refresh_short_material_labels()
+        self.status_var.set(f"Loaded {len(materials)} material(s) for {material_type}.")
+
+    def refresh_short_material_labels(self, _event=None):
+        """Populate the short material label dropdown from material choices."""
+        if "material" not in self.fields or "deform_material_name" not in self.fields:
+            return
+        materials = list(self.fields["deform_material_name"].widget.cget("values"))
+        labels = sorted({short_material_label(material) for material in materials if str(material).strip()})
+        current_material = self.fields["deform_material_name"].var.get()
+        suggested_label = short_material_label(current_material)
+        if suggested_label and suggested_label not in labels:
+            labels.insert(0, suggested_label)
+        self.fields["material"].widget.configure(values=labels)
+        if suggested_label:
+            self.fields["material"].set_value(suggested_label)
 
     def build_outputs_tab(self):
         self.add_field("Outputs", "Export post-hit keys", "export_post_hit_keys", 0, kind="combo_bool", options=BOOLEAN_OPTIONS)
@@ -458,6 +574,7 @@ class DeformConfigGui(tk.Tk):
         self.add_field("Outputs", "Load-stroke object", "load_stroke_object", 3, kind="combo", options=["Top Die", "Bottom Die", "Workpiece"])
         self.add_field("Outputs", "Post-process after run", "post_process_after_run", 4, kind="combo_bool", options=BOOLEAN_OPTIONS)
         self.add_field("Outputs", "Post-process output subfolder", "post_process_output_subdir", 5)
+        self.fields["post_process_output_subdir"].widget.configure(state="readonly")
         self.add_field("Outputs", "Damage object", "post_process_damage_object", 6, kind="combo", options=["Workpiece", "Top Die", "Bottom Die"])
         self.add_field("Outputs", "Damage step number", "post_process_damage_step_no", 7)
 
@@ -746,6 +863,7 @@ class DeformConfigGui(tk.Tk):
             config[key] = field.get_value()
         config["columns"] = {key: field.get_value() for key, field in self.column_fields.items()}
         config["key_files"] = {key: field.get_value() for key, field in self.key_file_fields.items()}
+        config["material_type"] = self.material_type_var.get()
         return config
 
     def set_config_values(self, config):
@@ -758,6 +876,16 @@ class DeformConfigGui(tk.Tk):
         for key, field in self.key_file_fields.items():
             if key in config.get("key_files", {}):
                 field.set_value(config["key_files"][key])
+        material_name = str(config.get("deform_material_name", ""))
+        material_type = str(config.get("material_type", "")) or self.find_material_type(material_name)
+        if material_type:
+            self.material_type_var.set(material_type)
+            self.on_material_type_changed()
+        if material_name and "deform_material_name" in self.fields:
+            self.fields["deform_material_name"].set_value(
+                self.resolve_material_name(material_name, self.material_type_var.get())
+            )
+        self.refresh_short_material_labels()
         self.refresh_file_dropdowns()
 
     def save_json_config(self):
