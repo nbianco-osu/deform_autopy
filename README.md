@@ -1,4 +1,4 @@
-# DEFORM API Automation Codebase
+﻿# DEFORM API Automation Codebase
 
 This folder contains the current DEFORM automation workflow for Agility Forge
 multihit simulations, post-processing, dataset creation, and Bayesian
@@ -75,6 +75,19 @@ Each hit is stored in its own subfolder:
 - `visualize_doe_results.py`
   - Builds HTML/CSV reporting for DOE results.
   - Generates plots when `matplotlib` is available.
+
+
+## GUI Config Launcher
+
+`deform_config_gui.py` is a Tkinter GUI for creating JSON configs for `run_deform_hits_config.py` without editing Python by hand. It reads `DEFAULT_CONFIG` from the runner, provides dropdowns for common choices, saves a config JSON, and can optionally launch the DEFORM runner with that config.
+
+Launch it on the lab computer with:
+
+```powershell
+python deform_config_gui.py
+```
+
+If `python` is not on PATH, open `deform_config_gui.py` in Spyder or run it with the Python executable used for DEFORM automation.
 
 ## Key Configuration Tags
 
@@ -295,3 +308,4 @@ with files such as:
 
 See [README_OPTIMIZATION.md](README_OPTIMIZATION.md) for DOE, dataset, surrogate
 modeling, Bayesian proposal, and visualization workflow details.
+
