@@ -45,18 +45,18 @@ MESH_OPTIONS = ["coarse", "fine"]
 BOOLEAN_OPTIONS = ["true", "false"]
 
 FONT_FAMILY = "Segoe UI"
-COLOR_BG = "#0b1120"
-COLOR_PANEL = "#111827"
-COLOR_HEADER = "#020617"
-COLOR_HEADER_MUTED = "#94a3b8"
-COLOR_TEXT = "#e5e7eb"
-COLOR_MUTED = "#cbd5e1"
-COLOR_BORDER = "#334155"
-COLOR_ACCENT = "#38bdf8"
-COLOR_ACCENT_DARK = "#0ea5e9"
-COLOR_SUCCESS = "#34d399"
-COLOR_LOG_BG = "#020617"
-COLOR_LOG_FG = "#dbeafe"
+COLOR_BG = "#f7f8fb"
+COLOR_PANEL = "#ffffff"
+COLOR_HEADER = "#ffffff"
+COLOR_HEADER_MUTED = "#8a93a5"
+COLOR_TEXT = "#2f3440"
+COLOR_MUTED = "#657085"
+COLOR_BORDER = "#d8dde7"
+COLOR_ACCENT = "#5ba4cf"
+COLOR_ACCENT_DARK = "#3f8eb8"
+COLOR_SUCCESS = "#6fa3c8"
+COLOR_LOG_BG = "#f5f7fa"
+COLOR_LOG_FG = "#2f3440"
 
 def safe_eval_default_config_node(node, names):
     """Evaluate the subset of Python syntax used by DEFAULT_CONFIG."""
@@ -192,6 +192,15 @@ def load_material_catalog(csv_path=MATERIAL_LIST_PATH):
     return {key: sorted(set(values)) for key, values in sorted(catalog.items())}
 
 
+def set_simulation_modes_from_jmak(config):
+    """Set DEFORM modes from the JMAK toggle: True -> D H G, False -> D H."""
+    use_jmak = config.get("use_jmak", False)
+    if isinstance(use_jmak, str):
+        use_jmak = use_jmak.strip().lower() in {"true", "yes", "1", "on"}
+    config["jmak_simulation_modes"] = "D H G" if use_jmak else "D H"
+    return config
+
+
 class ConfigField:
     """Small wrapper around one editable config field."""
 
@@ -308,44 +317,44 @@ class DeformConfigGui(tk.Tk):
             except tk.TclError:
                 continue
 
-        self.option_add("*Font", (FONT_FAMILY, 14))
-        self.option_add("*TCombobox*Listbox.font", (FONT_FAMILY, 16))
-        self.option_add("*TCombobox*Listbox.background", "#0f172a")
+        self.option_add("*Font", (FONT_FAMILY, 11))
+        self.option_add("*TCombobox*Listbox.font", (FONT_FAMILY, 11))
+        self.option_add("*TCombobox*Listbox.background", "#ffffff")
         self.option_add("*TCombobox*Listbox.foreground", COLOR_TEXT)
-        self.option_add("*TCombobox*Listbox.selectBackground", COLOR_ACCENT)
-        self.option_add("*TCombobox*Listbox.selectForeground", "#020617")
+        self.option_add("*TCombobox*Listbox.selectBackground", "#dff0fa")
+        self.option_add("*TCombobox*Listbox.selectForeground", COLOR_TEXT)
 
         self.style.configure(".", font=(FONT_FAMILY, 10), background=COLOR_BG, foreground=COLOR_TEXT)
         self.style.configure("App.TFrame", background=COLOR_BG)
         self.style.configure("Hero.TFrame", background=COLOR_HEADER)
         self.style.configure("Card.TFrame", background=COLOR_PANEL)
+        self.style.configure("StepNav.TFrame", background="#f3f5f9")
         self.style.configure("Footer.TFrame", background=COLOR_BG)
         self.style.configure("ButtonBar.TFrame", background=COLOR_PANEL)
 
-        self.style.configure("TLabel", background=COLOR_PANEL, foreground=COLOR_TEXT, font=(FONT_FAMILY, 11, "bold"), padding=(0, 1))
-        self.style.configure("Muted.TLabel", background=COLOR_PANEL, foreground="#f8fafc", font=(FONT_FAMILY, 12, "bold"))
-        self.style.configure("HeroTitle.TLabel", background=COLOR_HEADER, foreground="#f8fafc", font=(FONT_FAMILY, 28, "bold"))
-        self.style.configure("HeroSubtitle.TLabel", background=COLOR_HEADER, foreground=COLOR_HEADER_MUTED, font=(FONT_FAMILY, 11))
-        self.style.configure("Section.TLabel", background=COLOR_PANEL, foreground="#f8fafc", font=(FONT_FAMILY, 13, "bold"))
+        self.style.configure("TLabel", background=COLOR_PANEL, foreground=COLOR_TEXT, font=(FONT_FAMILY, 11), padding=(0, 1))
+        self.style.configure("Muted.TLabel", background=COLOR_PANEL, foreground=COLOR_TEXT, font=(FONT_FAMILY, 11, "bold"))
+        self.style.configure("HeroTitle.TLabel", background=COLOR_HEADER, foreground=COLOR_TEXT, font=(FONT_FAMILY, 18, "bold"))
+        self.style.configure("HeroSubtitle.TLabel", background=COLOR_HEADER, foreground=COLOR_HEADER_MUTED, font=(FONT_FAMILY, 10))
+        self.style.configure("Section.TLabel", background=COLOR_PANEL, foreground=COLOR_TEXT, font=(FONT_FAMILY, 13, "bold"))
         self.style.configure("Status.TLabel", background=COLOR_BG, foreground=COLOR_MUTED, font=(FONT_FAMILY, 10))
 
-        self.style.configure("TEntry", fieldbackground="#0f172a", foreground=COLOR_TEXT, insertcolor=COLOR_TEXT, bordercolor=COLOR_BORDER, lightcolor=COLOR_BORDER, darkcolor=COLOR_BORDER, padding=8)
-        self.style.map("TEntry", bordercolor=[("focus", COLOR_ACCENT)], fieldbackground=[("disabled", "#111827")], foreground=[("disabled", "#94a3b8")])
-        self.style.configure("TCombobox", fieldbackground="#0f172a", background="#0f172a", foreground=COLOR_TEXT, bordercolor=COLOR_BORDER, lightcolor=COLOR_BORDER, darkcolor=COLOR_BORDER, arrowcolor=COLOR_ACCENT, padding=8, arrowsize=15)
-        self.style.map("TCombobox", bordercolor=[("focus", COLOR_ACCENT)], fieldbackground=[("readonly", "#0f172a")], foreground=[("readonly", COLOR_TEXT)])
+        self.style.configure("TEntry", fieldbackground="#ffffff", foreground=COLOR_TEXT, insertcolor=COLOR_TEXT, bordercolor=COLOR_BORDER, lightcolor=COLOR_BORDER, darkcolor=COLOR_BORDER, padding=8)
+        self.style.map("TEntry", bordercolor=[("focus", COLOR_ACCENT)], fieldbackground=[("disabled", "#f0f2f5")], foreground=[("disabled", "#7d8797")])
+        self.style.configure("TCombobox", fieldbackground="#ffffff", background="#ffffff", foreground=COLOR_TEXT, bordercolor=COLOR_BORDER, lightcolor=COLOR_BORDER, darkcolor=COLOR_BORDER, arrowcolor=COLOR_MUTED, padding=8, arrowsize=15)
+        self.style.map("TCombobox", bordercolor=[("focus", COLOR_ACCENT)], fieldbackground=[("readonly", "#ffffff")], foreground=[("readonly", COLOR_TEXT)])
 
-        self.style.configure("TButton", background="#1e293b", foreground="#f8fafc", bordercolor=COLOR_BORDER, focusthickness=1, focuscolor=COLOR_ACCENT, padding=(13, 8), relief="flat")
-        self.style.map("TButton", background=[("active", "#334155"), ("pressed", "#475569")], foreground=[("active", "#ffffff"), ("pressed", "#ffffff"), ("disabled", "#94a3b8")])
-        self.style.configure("Accent.TButton", background=COLOR_ACCENT, foreground="#020617", bordercolor=COLOR_ACCENT, padding=(15, 9), relief="flat")
-        self.style.map("Accent.TButton", background=[("active", COLOR_ACCENT_DARK), ("pressed", "#0284c7")], foreground=[("active", "#020617"), ("pressed", "#020617"), ("disabled", "#475569")])
-        self.style.configure("Success.TButton", background=COLOR_SUCCESS, foreground="#022c22", bordercolor=COLOR_SUCCESS, padding=(15, 9), relief="flat")
-        self.style.map("Success.TButton", background=[("active", "#10b981"), ("pressed", "#059669")], foreground=[("active", "#022c22"), ("pressed", "#022c22"), ("disabled", "#475569")])
+        self.style.configure("TButton", background="#f5f7fa", foreground=COLOR_TEXT, bordercolor=COLOR_BORDER, focusthickness=1, focuscolor=COLOR_ACCENT, padding=(13, 8), relief="flat")
+        self.style.map("TButton", background=[("active", "#e9eef5"), ("pressed", "#dfe6ef")], foreground=[("active", COLOR_TEXT), ("pressed", COLOR_TEXT), ("disabled", "#9aa3b2")])
+        self.style.configure("Accent.TButton", background="#6fa3c8", foreground="#ffffff", bordercolor="#6fa3c8", padding=(15, 9), relief="flat")
+        self.style.map("Accent.TButton", background=[("active", "#5d94bb"), ("pressed", "#4c84ab")], foreground=[("active", "#ffffff"), ("pressed", "#ffffff"), ("disabled", "#9aa3b2")])
+        self.style.configure("Success.TButton", background="#5d94bb", foreground="#ffffff", bordercolor="#5d94bb", padding=(15, 9), relief="flat")
+        self.style.map("Success.TButton", background=[("active", "#4c84ab"), ("pressed", "#3f7398")], foreground=[("active", "#ffffff"), ("pressed", "#ffffff"), ("disabled", "#9aa3b2")])
 
-        self.style.configure("TNotebook", background=COLOR_BG, borderwidth=0, tabmargins=(0, 4, 0, 0))
-        self.style.configure("TNotebook.Tab", background="#1e293b", foreground="#cbd5e1", padding=(15, 10), borderwidth=0, font=(FONT_FAMILY, 10, "bold"))
-        self.style.map("TNotebook.Tab", background=[("selected", COLOR_PANEL), ("active", "#273449")], foreground=[("selected", "#f8fafc"), ("active", "#f8fafc")])
+        self.style.configure("Workflow.TNotebook", background=COLOR_PANEL, borderwidth=0, tabmargins=(0, 0, 0, 0))
+        self.style.layout("Workflow.TNotebook.Tab", [])
         self.style.configure("TSeparator", background=COLOR_BORDER)
-        self.style.configure("Vertical.TScrollbar", background="#1e293b", troughcolor=COLOR_BG, bordercolor=COLOR_BORDER, arrowcolor=COLOR_MUTED)
+        self.style.configure("Vertical.TScrollbar", background="#eef2f7", troughcolor="#f7f8fb", bordercolor=COLOR_BORDER, arrowcolor=COLOR_MUTED)
 
     def create_scrollable_tab(self, notebook, name):
         """Create one notebook tab with its own vertical scrollbar."""
@@ -391,27 +400,56 @@ class DeformConfigGui(tk.Tk):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        header = ttk.Frame(self, padding=(26, 22), style="Hero.TFrame")
-        header.grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 10))
+        header = ttk.Frame(self, padding=(18, 14), style="Hero.TFrame")
+        header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(1, weight=1)
+        ttk.Label(header, text="Jobs", style="HeroTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text="Shared / DEFORM Automation / Multihit Job", style="HeroSubtitle.TLabel").grid(row=1, column=0, sticky="w", pady=(5, 0))
+        ttk.Label(header, text="Job ID: deform-gui", style="HeroSubtitle.TLabel").grid(row=0, column=2, sticky="e", padx=(10, 0))
 
-        ttk.Label(
-            header,
-            text="DEFORM Automation Studio",
-            style="HeroTitle.TLabel",
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            header,
-            text="Configure multihit runs, DOE studies, post-processing, and reports from one workspace.",
-            style="HeroSubtitle.TLabel",
-        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(5, 0))
+        workspace = ttk.Frame(self, style="App.TFrame")
+        workspace.grid(row=1, column=0, sticky="nsew")
+        workspace.columnconfigure(1, weight=1)
+        workspace.rowconfigure(0, weight=1)
 
-        body = ttk.Notebook(self, style="TNotebook")
-        body.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 10))
+        step_nav = ttk.Frame(workspace, padding=(0, 0), style="StepNav.TFrame")
+        step_nav.grid(row=0, column=0, sticky="nsw")
+        step_nav.grid_propagate(False)
+        step_nav.configure(width=230)
+
+        body = ttk.Notebook(workspace, style="Workflow.TNotebook")
+        body.grid(row=0, column=1, sticky="nsew", padx=(0, 12), pady=(0, 12))
 
         self.tabs = {}
-        for name in ["Paths", "Run Setup", "Material/JMAK", "Outputs", "Columns", "Action Files", "DOE", "Post/Reports", "Run"]:
+        self.nav_buttons = {}
+        tab_names = ["Paths", "Run Setup", "Material/JMAK", "Outputs", "Columns", "Action Files", "DOE", "Post/Reports", "Run"]
+        nav_labels = {
+            "Paths": "Setup",
+            "Run Setup": "Run setup",
+            "Material/JMAK": "Materials",
+            "Outputs": "Outputs",
+            "Columns": "Columns",
+            "Action Files": "Action files",
+            "DOE": "DOE",
+            "Post/Reports": "Results",
+            "Run": "Launch",
+        }
+        for index, name in enumerate(tab_names):
             self.tabs[name] = self.create_scrollable_tab(body, name)
+            button = tk.Button(
+                step_nav,
+                text=nav_labels.get(name, name),
+                anchor="w",
+                bd=0,
+                relief="flat",
+                padx=20,
+                pady=15,
+                font=(FONT_FAMILY, 14),
+                command=lambda tab_name=name: self.select_workflow_tab(tab_name),
+            )
+            button.grid(row=index, column=0, sticky="ew")
+            self.nav_buttons[name] = button
+        step_nav.columnconfigure(0, weight=1)
 
         self.build_paths_tab()
         self.build_run_setup_tab()
@@ -422,11 +460,27 @@ class DeformConfigGui(tk.Tk):
         self.build_doe_tab()
         self.build_post_reports_tab()
         self.build_launch_tab()
+        self.workflow_body = body
+        self.select_workflow_tab("Paths")
 
         footer = ttk.Frame(self, padding=(16, 0, 16, 10), style="Footer.TFrame")
         footer.grid(row=2, column=0, sticky="ew")
         footer.columnconfigure(0, weight=1)
         ttk.Label(footer, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=0, sticky="w")
+
+    def select_workflow_tab(self, tab_name):
+        """Select a workflow page from the left navigation rail."""
+        if not hasattr(self, "workflow_body"):
+            return
+        tab_names = list(self.tabs.keys())
+        if tab_name not in self.tabs:
+            return
+        self.workflow_body.select(tab_names.index(tab_name))
+        for name, button in self.nav_buttons.items():
+            if name == tab_name:
+                button.configure(bg="#ffffff", fg="#2f3440")
+            else:
+                button.configure(bg="#f3f5f9", fg="#4a5568")
 
     def add_field(self, tab_name, label, key, row, kind="entry", options=None, browse=None):
         field = ConfigField(
@@ -512,9 +566,22 @@ class DeformConfigGui(tk.Tk):
         self.add_field("Material/JMAK", "User material library", "user_material_library_dir", 7, browse="directory")
         self.add_field("Material/JMAK", "Material number", "material_number", 8)
         self.add_field("Material/JMAK", "Use JMAK", "use_jmak", 9, kind="combo_bool", options=BOOLEAN_OPTIONS)
-        self.add_field("Material/JMAK", "JMAK simulation modes", "jmak_simulation_modes", 10, kind="combo", options=["D H G", "D G", "D H T G"])
+        self.add_field("Material/JMAK", "JMAK simulation modes", "jmak_simulation_modes", 10, kind="combo", options=["D H G", "D H"])
+        self.fields["use_jmak"].widget.bind("<<ComboboxSelected>>", self.update_jmak_simulation_modes)
+        self.fields["jmak_simulation_modes"].widget.configure(state="readonly")
+        self.update_jmak_simulation_modes()
         self.add_field("Material/JMAK", "Mean grain size, um", "mean_grain_size_um", 11)
         self.add_field("Material/JMAK", "Enable lag time", "enable_lag_time", 12, kind="combo_bool", options=BOOLEAN_OPTIONS)
+
+    def update_jmak_simulation_modes(self, _event=None):
+        """Populate simulation modes from the Use JMAK GUI choice."""
+        if "use_jmak" not in self.fields or "jmak_simulation_modes" not in self.fields:
+            return
+        config = {"use_jmak": self.fields["use_jmak"].get_value()}
+        set_simulation_modes_from_jmak(config)
+        self.fields["jmak_simulation_modes"].set_value(config["jmak_simulation_modes"])
+        if _event is not None:
+            self.status_var.set(f"JMAK simulation modes set to {config['jmak_simulation_modes']}.")
 
     def find_material_type(self, material_name):
         """Return the material type containing material_name, if known."""
@@ -760,7 +827,7 @@ class DeformConfigGui(tk.Tk):
         self.plot_display = tk.Label(
             tab,
             text="Refresh plots after generating a DOE report.",
-            bg="#0f172a",
+            bg="#ffffff",
             fg=COLOR_MUTED,
             anchor="center",
             relief="flat",
@@ -864,6 +931,9 @@ class DeformConfigGui(tk.Tk):
         config["columns"] = {key: field.get_value() for key, field in self.column_fields.items()}
         config["key_files"] = {key: field.get_value() for key, field in self.key_file_fields.items()}
         config["material_type"] = self.material_type_var.get()
+        set_simulation_modes_from_jmak(config)
+        if "jmak_simulation_modes" in self.fields:
+            self.fields["jmak_simulation_modes"].set_value(config["jmak_simulation_modes"])
         return config
 
     def set_config_values(self, config):
@@ -886,6 +956,7 @@ class DeformConfigGui(tk.Tk):
                 self.resolve_material_name(material_name, self.material_type_var.get())
             )
         self.refresh_short_material_labels()
+        self.update_jmak_simulation_modes()
         self.refresh_file_dropdowns()
 
     def save_json_config(self):
@@ -1197,7 +1268,7 @@ class DeformConfigGui(tk.Tk):
         display_image = raw_image.subsample(scale, scale) if scale > 1 else raw_image
         self.current_plot_raw = raw_image
         self.current_plot_image = display_image
-        self.plot_display.configure(image=display_image, text="", bg="#0f172a")
+        self.plot_display.configure(image=display_image, text="", bg="#ffffff")
         self.plot_caption.set(
             f"Showing {plot_path.name} ({raw_image.width()} x {raw_image.height()} px, scale 1/{scale})"
         )

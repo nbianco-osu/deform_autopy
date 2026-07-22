@@ -96,8 +96,9 @@ DEFAULT_CONFIG = {
     #TODO: update stock diameters to support other diameters only
     "stock_diameter": 0.625, # supports 0.625in only 
     "use_jmak": True, # 316L is the only alloy with grain data
-    # DEFORM simulation modes passed to defModel.simCtrl.setSimModes when JMAK
-    # is enabled. "G" is added automatically if it is missing.
+    # DEFORM simulation modes are derived from use_jmak during config load:
+    # True -> "D H G" for deformation, heat transfer, and grain simulation.
+    # False -> "D H" for deformation and heat transfer only.
     "jmak_simulation_modes": "D H G",
     "mean_grain_size_um": 26.3,
     "enable_lag_time": False, # TODO: update to support lag time between hits and heats
@@ -146,6 +147,7 @@ def load_config(config_path):
         config["_config_dir"] = os.path.dirname(os.path.abspath(config_path))
     else:
         config["_config_dir"] = os.getcwd()
+    enforce_jmak_simulation_modes(config)
     return config
 
 
@@ -338,6 +340,28 @@ def normalize_simulation_modes(simulation_modes):
     return " ".join(modes)
 
 
+def config_bool(value):
+    """Interpret booleans from JSON configs and hand-edited text configs."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "yes", "1", "on"}
+    return bool(value)
+
+
+def enforce_jmak_simulation_modes(config):
+    """Set DEFORM simulation modes from the JMAK toggle.
+
+    JMAK-enabled runs require grain simulation, so they always use `D H G`.
+    Non-JMAK runs keep deformation and heat transfer only: `D H`.
+    """
+    if config_bool(config.get("use_jmak", False)):
+        config["jmak_simulation_modes"] = "D H G"
+    else:
+        config["jmak_simulation_modes"] = "D H"
+    return config["jmak_simulation_modes"]
+
+
 def enable_grain_simulation_if_needed(config):
     """Enable DEFORM grain simulation mode when JMAK is active.
 
@@ -345,18 +369,10 @@ def enable_grain_simulation_if_needed(config):
     modes. The API manual lists `G` as the grain mode, so JMAK runs must include
     it before the DB is written.
     """
-    if not config.get("use_jmak", False):
+    if not config_bool(config.get("use_jmak", False)):
         return None
 
-    simulation_modes = normalize_simulation_modes(
-        config.get("jmak_simulation_modes", "D H G")
-    )
-    modes = simulation_modes.split()
-    if "G" not in modes:
-        modes.append("G")
-    simulation_modes = " ".join(modes)
-
-    return simulation_modes
+    return enforce_jmak_simulation_modes(config)
 
 
 def run_job():
