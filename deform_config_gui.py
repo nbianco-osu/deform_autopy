@@ -1,4 +1,4 @@
-﻿"""
+"""
 Tkinter GUI for configuring and launching run_deform_hits_config.py.
 
 The GUI intentionally does not import run_deform_hits_config.py. That runner
@@ -20,7 +20,12 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 APP_DIR = Path(__file__).resolve().parent
 RUNNER_PATH = APP_DIR / "run_deform_hits_config.py"
+DOE_PATH = APP_DIR / "run_initial_doe.py"
+POST_PROCESS_PATH = APP_DIR / "run_deform_post_processing.py"
+VISUALIZE_DOE_PATH = APP_DIR / "visualize_doe_results.py"
+ACTION_CREATOR_PATH = APP_DIR / "action_file_creator.py"
 CONFIG_DIR = APP_DIR / "configs"
+LOCAL_ACTION_FILES_DIR = APP_DIR / "action_files"
 
 
 MATERIAL_OPTIONS = [
@@ -36,6 +41,20 @@ DIE_MOTION_OPTIONS = ["", "single_top_die", "symmetric"]
 DIE_AXIS_OPTIONS = ["z", "y"]
 MESH_OPTIONS = ["coarse", "fine"]
 BOOLEAN_OPTIONS = ["true", "false"]
+
+FONT_FAMILY = "Segoe UI"
+COLOR_BG = "#0b1120"
+COLOR_PANEL = "#111827"
+COLOR_HEADER = "#020617"
+COLOR_HEADER_MUTED = "#94a3b8"
+COLOR_TEXT = "#e5e7eb"
+COLOR_MUTED = "#cbd5e1"
+COLOR_BORDER = "#334155"
+COLOR_ACCENT = "#38bdf8"
+COLOR_ACCENT_DARK = "#0ea5e9"
+COLOR_SUCCESS = "#34d399"
+COLOR_LOG_BG = "#020617"
+COLOR_LOG_FG = "#dbeafe"
 
 
 def safe_eval_default_config_node(node, names):
@@ -143,17 +162,17 @@ class ConfigField:
         self.kind = kind
         self.var = tk.StringVar(value=self.format_value(value, kind))
 
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Label(parent, text=label, style="Muted.TLabel").grid(row=row, column=0, sticky="w", padx=(12, 12), pady=7)
 
         if kind in ["combo", "combo_bool"]:
-            self.widget = ttk.Combobox(parent, textvariable=self.var, values=options or [], width=48)
+            self.widget = ttk.Combobox(parent, textvariable=self.var, values=options or [], width=52)
         else:
-            self.widget = ttk.Entry(parent, textvariable=self.var, width=51)
-        self.widget.grid(row=row, column=1, sticky="ew", padx=4, pady=4)
+            self.widget = ttk.Entry(parent, textvariable=self.var, width=55)
+        self.widget.grid(row=row, column=1, sticky="ew", padx=6, pady=6)
 
         if browse:
             ttk.Button(parent, text="Browse", command=lambda: self.browse_path(browse)).grid(
-                row=row, column=2, sticky="ew", padx=(4, 8), pady=4
+                row=row, column=2, sticky="ew", padx=(6, 10), pady=6
             )
 
     @staticmethod
@@ -190,14 +209,19 @@ class DeformConfigGui(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("DEFORM Multihit Config GUI")
-        self.geometry("1120x760")
-        self.minsize(980, 680)
+        self.title("DEFORM Automation Studio")
+        self.geometry("1280x860")
+        self.minsize(1120, 760)
+        self.configure(bg=COLOR_BG)
+        self.apply_theme()
 
         self.default_config = load_default_config_from_runner()
+        if LOCAL_ACTION_FILES_DIR.exists():
+            self.default_config["action_path"] = str(LOCAL_ACTION_FILES_DIR)
         self.fields = {}
         self.column_fields = {}
         self.key_file_fields = {}
+        self.doe_fields = {}
 
         self.python_executable = tk.StringVar(value=sys.executable)
         self.config_output_path = tk.StringVar(
@@ -205,48 +229,164 @@ class DeformConfigGui(tk.Tk):
         )
         self.status_var = tk.StringVar(value="Ready.")
 
+        self.doe_script_path = tk.StringVar(value=str(DOE_PATH))
+        self.doe_project_root = tk.StringVar(value=str(APP_DIR))
+        self.doe_base_config_path = tk.StringVar(value=str(CONFIG_DIR / "run_deform_hits_gui_config.json"))
+        self.doe_optimization_root = tk.StringVar(value=str(APP_DIR / "optimization"))
+        self.doe_study_name = tk.StringVar(value="single_die_5hit_initial_doe")
+
+        self.post_config_path = tk.StringVar(value=str(CONFIG_DIR / "run_deform_hits_gui_config.json"))
+        self.post_run_dir = tk.StringVar(value="")
+        self.report_study_root = tk.StringVar(value=str(APP_DIR / "optimization" / "single_die_5hit_initial_doe"))
+        self.report_dataset_path = tk.StringVar(value="")
+        self.report_manifest_path = tk.StringVar(value="")
+        self.report_candidates_path = tk.StringVar(value="")
+        self.report_surrogate_path = tk.StringVar(value="")
+        self.report_output_dir = tk.StringVar(value="")
+        self.plot_folder_path = tk.StringVar(value="")
+        self.selected_plot_file = tk.StringVar(value="")
+        self.current_plot_raw = None
+        self.current_plot_image = None
+
+        self.af_base_path = tk.StringVar(value=str(Path.home() / "OneDrive" / "Desktop" / "OSU Research" / "AF Data"))
+        self.af_hit_folders = tk.StringVar(value="Box")
+        self.af_output_dir = tk.StringVar(value=str(LOCAL_ACTION_FILES_DIR))
+        self.af_output_prefix = tk.StringVar(value="af")
+        self.af_position_threshold_mm = tk.StringVar(value="30.0")
+        self.af_force_sigma_multiplier = tk.StringVar(value="1.5")
+
         self.build_ui()
         self.refresh_file_dropdowns()
+
+    def apply_theme(self):
+        """Apply a modern ttk theme while keeping the app dependency-free."""
+        self.style = ttk.Style(self)
+        for theme_name in ("alt", "default", "vista", "xpnative"):
+            try:
+                self.style.theme_use(theme_name)
+                break
+            except tk.TclError:
+                continue
+
+        self.option_add("*Font", (FONT_FAMILY, 14))
+        self.option_add("*TCombobox*Listbox.font", (FONT_FAMILY, 16))
+        self.option_add("*TCombobox*Listbox.background", "#0f172a")
+        self.option_add("*TCombobox*Listbox.foreground", COLOR_TEXT)
+        self.option_add("*TCombobox*Listbox.selectBackground", COLOR_ACCENT)
+        self.option_add("*TCombobox*Listbox.selectForeground", "#020617")
+
+        self.style.configure(".", font=(FONT_FAMILY, 10), background=COLOR_BG, foreground=COLOR_TEXT)
+        self.style.configure("App.TFrame", background=COLOR_BG)
+        self.style.configure("Hero.TFrame", background=COLOR_HEADER)
+        self.style.configure("Card.TFrame", background=COLOR_PANEL)
+        self.style.configure("Footer.TFrame", background=COLOR_BG)
+        self.style.configure("ButtonBar.TFrame", background=COLOR_PANEL)
+
+        self.style.configure("TLabel", background=COLOR_PANEL, foreground=COLOR_TEXT, font=(FONT_FAMILY, 11, "bold"), padding=(0, 1))
+        self.style.configure("Muted.TLabel", background=COLOR_PANEL, foreground="#f8fafc", font=(FONT_FAMILY, 12, "bold"))
+        self.style.configure("HeroTitle.TLabel", background=COLOR_HEADER, foreground="#f8fafc", font=(FONT_FAMILY, 28, "bold"))
+        self.style.configure("HeroSubtitle.TLabel", background=COLOR_HEADER, foreground=COLOR_HEADER_MUTED, font=(FONT_FAMILY, 11))
+        self.style.configure("Section.TLabel", background=COLOR_PANEL, foreground="#f8fafc", font=(FONT_FAMILY, 13, "bold"))
+        self.style.configure("Status.TLabel", background=COLOR_BG, foreground=COLOR_MUTED, font=(FONT_FAMILY, 10))
+
+        self.style.configure("TEntry", fieldbackground="#0f172a", foreground=COLOR_TEXT, insertcolor=COLOR_TEXT, bordercolor=COLOR_BORDER, lightcolor=COLOR_BORDER, darkcolor=COLOR_BORDER, padding=8)
+        self.style.map("TEntry", bordercolor=[("focus", COLOR_ACCENT)], fieldbackground=[("disabled", "#111827")], foreground=[("disabled", "#94a3b8")])
+        self.style.configure("TCombobox", fieldbackground="#0f172a", background="#0f172a", foreground=COLOR_TEXT, bordercolor=COLOR_BORDER, lightcolor=COLOR_BORDER, darkcolor=COLOR_BORDER, arrowcolor=COLOR_ACCENT, padding=8, arrowsize=15)
+        self.style.map("TCombobox", bordercolor=[("focus", COLOR_ACCENT)], fieldbackground=[("readonly", "#0f172a")], foreground=[("readonly", COLOR_TEXT)])
+
+        self.style.configure("TButton", background="#1e293b", foreground="#f8fafc", bordercolor=COLOR_BORDER, focusthickness=1, focuscolor=COLOR_ACCENT, padding=(13, 8), relief="flat")
+        self.style.map("TButton", background=[("active", "#334155"), ("pressed", "#475569")], foreground=[("active", "#ffffff"), ("pressed", "#ffffff"), ("disabled", "#94a3b8")])
+        self.style.configure("Accent.TButton", background=COLOR_ACCENT, foreground="#020617", bordercolor=COLOR_ACCENT, padding=(15, 9), relief="flat")
+        self.style.map("Accent.TButton", background=[("active", COLOR_ACCENT_DARK), ("pressed", "#0284c7")], foreground=[("active", "#020617"), ("pressed", "#020617"), ("disabled", "#475569")])
+        self.style.configure("Success.TButton", background=COLOR_SUCCESS, foreground="#022c22", bordercolor=COLOR_SUCCESS, padding=(15, 9), relief="flat")
+        self.style.map("Success.TButton", background=[("active", "#10b981"), ("pressed", "#059669")], foreground=[("active", "#022c22"), ("pressed", "#022c22"), ("disabled", "#475569")])
+
+        self.style.configure("TNotebook", background=COLOR_BG, borderwidth=0, tabmargins=(0, 4, 0, 0))
+        self.style.configure("TNotebook.Tab", background="#1e293b", foreground="#cbd5e1", padding=(15, 10), borderwidth=0, font=(FONT_FAMILY, 10, "bold"))
+        self.style.map("TNotebook.Tab", background=[("selected", COLOR_PANEL), ("active", "#273449")], foreground=[("selected", "#f8fafc"), ("active", "#f8fafc")])
+        self.style.configure("TSeparator", background=COLOR_BORDER)
+        self.style.configure("Vertical.TScrollbar", background="#1e293b", troughcolor=COLOR_BG, bordercolor=COLOR_BORDER, arrowcolor=COLOR_MUTED)
+
+    def create_scrollable_tab(self, notebook, name):
+        """Create one notebook tab with its own vertical scrollbar."""
+        outer = ttk.Frame(notebook, style="Card.TFrame")
+        outer.rowconfigure(0, weight=1)
+        outer.columnconfigure(0, weight=1)
+
+        canvas = tk.Canvas(
+            outer,
+            bg=COLOR_PANEL,
+            highlightthickness=0,
+            bd=0,
+            yscrollincrement=24,
+        )
+        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview, style="Vertical.TScrollbar")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        inner = ttk.Frame(canvas, padding=18, style="Card.TFrame")
+        inner.columnconfigure(1, weight=1)
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def update_scroll_region(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def update_inner_width(event):
+            canvas.itemconfigure(window_id, width=event.width)
+
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        inner.bind("<Configure>", update_scroll_region)
+        canvas.bind("<Configure>", update_inner_width)
+        canvas.bind("<Enter>", lambda _event: canvas.bind_all("<MouseWheel>", on_mousewheel))
+        canvas.bind("<Leave>", lambda _event: canvas.unbind_all("<MouseWheel>"))
+
+        notebook.add(outer, text=name)
+        return inner
 
     def build_ui(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        header = ttk.Frame(self, padding=10)
-        header.grid(row=0, column=0, sticky="ew")
+        header = ttk.Frame(self, padding=(26, 22), style="Hero.TFrame")
+        header.grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 10))
         header.columnconfigure(1, weight=1)
 
         ttk.Label(
             header,
-            text="DEFORM Multihit Config GUI",
-            font=("Segoe UI", 16, "bold"),
+            text="DEFORM Automation Studio",
+            style="HeroTitle.TLabel",
         ).grid(row=0, column=0, sticky="w")
         ttk.Label(
             header,
-            text="Build JSON configs for run_deform_hits_config.py without editing Python by hand.",
-        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 0))
+            text="Configure multihit runs, DOE studies, post-processing, and reports from one workspace.",
+            style="HeroSubtitle.TLabel",
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(5, 0))
 
-        body = ttk.Notebook(self)
-        body.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 8))
+        body = ttk.Notebook(self, style="TNotebook")
+        body.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 10))
 
         self.tabs = {}
-        for name in ["Paths", "Run Setup", "Material/JMAK", "Outputs", "Columns", "Run"]:
-            frame = ttk.Frame(body, padding=8)
-            frame.columnconfigure(1, weight=1)
-            body.add(frame, text=name)
-            self.tabs[name] = frame
+        for name in ["Paths", "Run Setup", "Material/JMAK", "Outputs", "Columns", "Action Files", "DOE", "Post/Reports", "Run"]:
+            self.tabs[name] = self.create_scrollable_tab(body, name)
 
         self.build_paths_tab()
         self.build_run_setup_tab()
         self.build_material_tab()
         self.build_outputs_tab()
         self.build_columns_tab()
+        self.build_action_files_tab()
+        self.build_doe_tab()
+        self.build_post_reports_tab()
         self.build_launch_tab()
 
-        footer = ttk.Frame(self, padding=(10, 0, 10, 8))
+        footer = ttk.Frame(self, padding=(16, 0, 16, 10), style="Footer.TFrame")
         footer.grid(row=2, column=0, sticky="ew")
         footer.columnconfigure(0, weight=1)
-        ttk.Label(footer, textvariable=self.status_var).grid(row=0, column=0, sticky="w")
+        ttk.Label(footer, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=0, sticky="w")
 
     def add_field(self, tab_name, label, key, row, kind="entry", options=None, browse=None):
         field = ConfigField(
@@ -268,9 +408,9 @@ class DeformConfigGui(tk.Tk):
         self.add_field("Paths", "Action CSV", "action_file", 2, kind="combo", options=[])
         self.add_field("Paths", "Output run folder", "data_path", 3, browse="directory")
         self.add_field("Paths", "Use custom key", "custom_key_bool", 4, kind="combo_bool", options=BOOLEAN_OPTIONS)
-        self.add_field("Paths", "Custom key file", "custom_key_name", 5, kind="combo", options=[])
+        self.add_field("Paths", "Custom key file", "custom_key_name", 5, kind="combo", options=[], browse="file")
 
-        ttk.Button(self.tabs["Paths"], text="Refresh file dropdowns", command=self.refresh_file_dropdowns).grid(
+        ttk.Button(self.tabs["Paths"], text="Refresh file dropdowns", command=self.refresh_file_dropdowns, style="Accent.TButton").grid(
             row=6, column=1, sticky="w", padx=4, pady=(10, 4)
         )
 
@@ -293,7 +433,7 @@ class DeformConfigGui(tk.Tk):
         self.add_field("Run Setup", "Mesh type", "mesh_type", 15, kind="combo", options=MESH_OPTIONS)
         self.add_field("Run Setup", "Stock diameter", "stock_diameter", 16)
 
-        ttk.Button(self.tabs["Run Setup"], text="Apply bdm/single-die rule now", command=self.apply_action_rule_preview).grid(
+        ttk.Button(self.tabs["Run Setup"], text="Apply bdm/single-die rule now", command=self.apply_action_rule_preview, style="Accent.TButton").grid(
             row=17, column=1, sticky="w", padx=4, pady=(10, 4)
         )
 
@@ -322,10 +462,17 @@ class DeformConfigGui(tk.Tk):
         self.add_field("Outputs", "Damage step number", "post_process_damage_step_no", 7)
 
     def build_columns_tab(self):
-        row = 0
+        ttk.Label(
+            self.tabs["Columns"],
+            text="These values are fixed defaults used by the automation scripts and cannot be changed from the GUI.",
+            style="Section.TLabel",
+            wraplength=820,
+        ).grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 14))
+        row = 1
         columns = self.default_config.get("columns", {})
         for key, value in columns.items():
             field = ConfigField(self.tabs["Columns"], f"CSV column: {key}", key, value, row)
+            field.widget.configure(state="readonly")
             self.column_fields[key] = field
             row += 1
 
@@ -337,28 +484,208 @@ class DeformConfigGui(tk.Tk):
         key_files = self.default_config.get("key_files", {})
         for key, value in key_files.items():
             field = ConfigField(self.tabs["Columns"], f"Key template for die {key}", key, value, row)
+            field.widget.configure(state="readonly")
             self.key_file_fields[key] = field
             row += 1
+
+    def build_action_files_tab(self):
+        tab = self.tabs["Action Files"]
+        ttk.Label(
+            tab,
+            text="Create DEFORM action CSVs from AF machine load-stroke folders. Output files are saved into action_files and then appear in the run setup dropdown.",
+            style="Section.TLabel",
+            wraplength=900,
+        ).grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 14))
+
+        rows = [
+            ("AF data root folder", self.af_base_path, "directory"),
+            ("Hit folders", self.af_hit_folders, None),
+            ("Output action_files folder", self.af_output_dir, "directory"),
+            ("Output filename prefix", self.af_output_prefix, None),
+            ("Position threshold, mm", self.af_position_threshold_mm, None),
+            ("Force sigma multiplier", self.af_force_sigma_multiplier, None),
+        ]
+        for index, (label, variable, browse_type) in enumerate(rows, start=1):
+            ttk.Label(tab, text=label, style="Muted.TLabel").grid(row=index, column=0, sticky="w", padx=(12, 12), pady=7)
+            ttk.Entry(tab, textvariable=variable, width=70).grid(row=index, column=1, sticky="ew", padx=6, pady=6)
+            if browse_type == "directory":
+                ttk.Button(tab, text="Browse", command=lambda var=variable: self.browse_directory_var(var)).grid(row=index, column=2, padx=(6, 10), pady=6)
+
+        ttk.Label(
+            tab,
+            text="Hit folders can be one name or a comma-separated list, for example: Box, TensileBar_Run1",
+            style="Muted.TLabel",
+            wraplength=820,
+        ).grid(row=7, column=1, columnspan=2, sticky="w", padx=6, pady=(0, 10))
+
+        button_frame = ttk.Frame(tab, style="ButtonBar.TFrame")
+        button_frame.grid(row=8, column=1, sticky="w", padx=6, pady=(8, 4))
+        ttk.Button(button_frame, text="Create Action File(s)", command=self.create_action_files_from_gui, style="Accent.TButton").pack(side="left", padx=(0, 6))
+        ttk.Button(button_frame, text="Refresh Action Dropdown", command=self.refresh_file_dropdowns).pack(side="left", padx=6)
+
+    def add_doe_field(self, label, key, value, row, kind="entry", options=None):
+        field = ConfigField(
+            self.tabs["DOE"],
+            label=label,
+            key=key,
+            value=value,
+            row=row,
+            kind=kind,
+            options=options,
+        )
+        self.doe_fields[key] = field
+        return field
+
+    def build_doe_tab(self):
+        tab = self.tabs["DOE"]
+        ttk.Label(tab, text="DOE script").grid(row=0, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.doe_script_path, width=70).grid(row=0, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=lambda: self.browse_file_var(self.doe_script_path, [("Python", "*.py"), ("All files", "*.*")])).grid(row=0, column=2, padx=(6, 10), pady=6)
+
+        ttk.Label(tab, text="Project root").grid(row=1, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.doe_project_root, width=70).grid(row=1, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=lambda: self.browse_directory_var(self.doe_project_root)).grid(row=1, column=2, padx=(6, 10), pady=6)
+
+        ttk.Label(tab, text="Base config JSON").grid(row=2, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.doe_base_config_path, width=70).grid(row=2, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=lambda: self.browse_file_var(self.doe_base_config_path, [("JSON", "*.json"), ("All files", "*.*")])).grid(row=2, column=2, padx=(6, 10), pady=6)
+
+        ttk.Label(tab, text="Optimization root").grid(row=3, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.doe_optimization_root, width=70).grid(row=3, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=lambda: self.browse_directory_var(self.doe_optimization_root)).grid(row=3, column=2, padx=(6, 10), pady=6)
+
+        ttk.Label(tab, text="Study name").grid(row=4, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.doe_study_name, width=70).grid(row=4, column=1, sticky="ew", padx=6, pady=6)
+
+        self.add_doe_field("Prepare runs", "PREPARE_RUNS", False, 5, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Execute runs", "EXECUTE_RUNS", False, 6, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Process results", "PROCESS_RESULTS", False, 7, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Propose next candidates", "PROPOSE_NEXT_CANDIDATES", False, 8, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Run next candidates", "RUN_NEXT_CANDIDATES", False, 9, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Execute next candidates", "EXECUTE_NEXT_CANDIDATES", False, 10, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Process next candidates", "PROCESS_NEXT_CANDIDATES", False, 11, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Combine datasets", "COMBINE_DATASETS", False, 12, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Make report", "MAKE_REPORT", False, 13, kind="combo_bool", options=BOOLEAN_OPTIONS)
+
+        self.add_doe_field("Number of hits", "NUM_HITS", 5, 14)
+        self.add_doe_field("Initial candidates", "N_CANDIDATES", 100, 15)
+        self.add_doe_field("Random seed", "RANDOM_SEED", 1, 16)
+        self.add_doe_field("Apply mode", "APPLY_MODE", "all_rows", 17, kind="combo", options=["all_rows", "hit_row"])
+        self.add_doe_field("Model type", "MODEL_TYPE", "random_forest", 18, kind="combo", options=["random_forest", "gaussian_process"])
+        self.add_doe_field("Next candidates", "N_NEXT_CANDIDATES", 5, 19)
+        self.add_doe_field("Random Bayesian candidates", "N_RANDOM_BAYESIAN_CANDIDATES", 2000, 20)
+        self.add_doe_field("Next round number", "NEXT_ROUND_NUMBER", 2, 21)
+        self.add_doe_field("Max round number", "MAX_ROUND_NUMBER", 2, 22)
+        self.add_doe_field("Bounds JSON", "BOUNDS", '{"depth_in": [0.01, 0.15], "forging_temp_c": [900, 1200]}', 23)
+        self.add_doe_field("Objective weights JSON", "OBJECTIVE_WEIGHTS", '{"damage_max": 10.0, "grain_std_um": 10.0, "top_die_center_distance": 10.0, "bottom_die_center_distance": 10.0}', 24)
+
+        button_frame = ttk.Frame(tab, style="ButtonBar.TFrame")
+        button_frame.grid(row=25, column=0, columnspan=3, sticky="ew", padx=8, pady=(10, 4))
+        ttk.Button(button_frame, text="Save Current Run Config for DOE", command=self.save_json_config).pack(side="left", padx=(0, 6))
+        ttk.Button(button_frame, text="Run DOE Workflow", command=self.run_doe_workflow, style="Accent.TButton").pack(side="left", padx=6)
+        ttk.Button(button_frame, text="Preview DOE Launcher", command=self.preview_doe_launcher).pack(side="left", padx=6)
+
+    def build_post_reports_tab(self):
+        tab = self.tabs["Post/Reports"]
+        ttk.Label(tab, text="Single-run post-processing", style="Section.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 8))
+
+        ttk.Label(tab, text="Run config JSON").grid(row=1, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.post_config_path, width=70).grid(row=1, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=lambda: self.browse_file_var(self.post_config_path, [("JSON", "*.json"), ("All files", "*.*")])).grid(row=1, column=2, padx=(6, 10), pady=6)
+
+        ttk.Label(tab, text="Completed run folder").grid(row=2, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.post_run_dir, width=70).grid(row=2, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=lambda: self.browse_directory_var(self.post_run_dir)).grid(row=2, column=2, padx=(6, 10), pady=6)
+
+        ttk.Button(tab, text="Run Single-Run Post-Processing", command=self.run_single_post_processing, style="Accent.TButton").grid(row=3, column=1, sticky="w", padx=4, pady=(8, 12))
+
+        ttk.Separator(tab, orient="horizontal").grid(row=4, column=0, columnspan=3, sticky="ew", pady=8)
+        ttk.Label(tab, text="DOE visualization/reporting", style="Section.TLabel").grid(row=5, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 8))
+
+        report_rows = [
+            ("Study root", self.report_study_root, "directory"),
+            ("Dataset CSV", self.report_dataset_path, "file"),
+            ("Manifest CSV", self.report_manifest_path, "file"),
+            ("Next candidates CSV", self.report_candidates_path, "file"),
+            ("Surrogate report JSON", self.report_surrogate_path, "file"),
+            ("Report output folder", self.report_output_dir, "directory"),
+        ]
+        for index, (label, variable, browse_type) in enumerate(report_rows, start=6):
+            ttk.Label(tab, text=label).grid(row=index, column=0, sticky="w", padx=(8, 4), pady=4)
+            ttk.Entry(tab, textvariable=variable, width=70).grid(row=index, column=1, sticky="ew", padx=6, pady=6)
+            if browse_type == "file":
+                command = lambda var=variable: self.browse_file_var(var, [("Data files", "*.csv *.json"), ("All files", "*.*")])
+            else:
+                command = lambda var=variable: self.browse_directory_var(var)
+            ttk.Button(tab, text="Browse", command=command).grid(row=index, column=2, padx=(6, 10), pady=6)
+
+        ttk.Button(tab, text="Run DOE Visualization Report", command=self.run_doe_visualization, style="Accent.TButton").grid(row=12, column=1, sticky="w", padx=4, pady=(8, 4))
+
+        ttk.Separator(tab, orient="horizontal").grid(row=13, column=0, columnspan=3, sticky="ew", pady=8)
+        ttk.Label(tab, text="Plot viewer", style="Section.TLabel").grid(row=14, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 8))
+
+        ttk.Label(tab, text="Plot folder").grid(row=15, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.plot_folder_path, width=70).grid(row=15, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=lambda: self.browse_directory_var(self.plot_folder_path)).grid(row=15, column=2, padx=(6, 10), pady=6)
+
+        ttk.Label(tab, text="Plot image").grid(row=16, column=0, sticky="w", padx=(8, 4), pady=4)
+        self.plot_combo = ttk.Combobox(tab, textvariable=self.selected_plot_file, values=[], width=67)
+        self.plot_combo.grid(row=16, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Refresh", command=self.refresh_plot_list).grid(row=16, column=2, padx=(6, 10), pady=6)
+
+        plot_buttons = ttk.Frame(tab, style="ButtonBar.TFrame")
+        plot_buttons.grid(row=17, column=1, sticky="w", padx=4, pady=(4, 8))
+        ttk.Button(plot_buttons, text="Show Selected Plot", command=self.show_selected_plot).pack(side="left", padx=(0, 6))
+        ttk.Button(plot_buttons, text="Use Report Folder", command=self.use_report_folder_for_plots).pack(side="left", padx=6)
+
+        self.plot_caption = tk.StringVar(value="No plot selected.")
+        ttk.Label(tab, textvariable=self.plot_caption).grid(row=18, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 4))
+        self.plot_display = tk.Label(
+            tab,
+            text="Refresh plots after generating a DOE report.",
+            bg="#0f172a",
+            fg=COLOR_MUTED,
+            anchor="center",
+            relief="flat",
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=COLOR_BORDER,
+            highlightcolor=COLOR_ACCENT,
+        )
+        self.plot_display.grid(row=19, column=0, columnspan=3, sticky="nsew", padx=8, pady=(0, 8))
+        tab.rowconfigure(19, weight=1)
 
     def build_launch_tab(self):
         tab = self.tabs["Run"]
         ttk.Label(tab, text="Python executable").grid(row=0, column=0, sticky="w", padx=(8, 4), pady=4)
-        ttk.Entry(tab, textvariable=self.python_executable, width=80).grid(row=0, column=1, sticky="ew", padx=4, pady=4)
-        ttk.Button(tab, text="Browse", command=self.browse_python).grid(row=0, column=2, padx=(4, 8), pady=4)
+        ttk.Entry(tab, textvariable=self.python_executable, width=80).grid(row=0, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=self.browse_python).grid(row=0, column=2, padx=(6, 10), pady=6)
 
         ttk.Label(tab, text="Config output path").grid(row=1, column=0, sticky="w", padx=(8, 4), pady=4)
-        ttk.Entry(tab, textvariable=self.config_output_path, width=80).grid(row=1, column=1, sticky="ew", padx=4, pady=4)
-        ttk.Button(tab, text="Browse", command=self.browse_config_output).grid(row=1, column=2, padx=(4, 8), pady=4)
+        ttk.Entry(tab, textvariable=self.config_output_path, width=80).grid(row=1, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=self.browse_config_output).grid(row=1, column=2, padx=(6, 10), pady=6)
 
-        button_frame = ttk.Frame(tab)
+        button_frame = ttk.Frame(tab, style="ButtonBar.TFrame")
         button_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=8, pady=(8, 4))
         ttk.Button(button_frame, text="Load JSON Config", command=self.load_json_config).pack(side="left", padx=(0, 6))
         ttk.Button(button_frame, text="Save JSON Config", command=self.save_json_config).pack(side="left", padx=6)
-        ttk.Button(button_frame, text="Save and Run DEFORM", command=self.save_and_run).pack(side="left", padx=6)
+        ttk.Button(button_frame, text="Save and Run DEFORM", command=self.save_and_run, style="Success.TButton").pack(side="left", padx=6)
         ttk.Button(button_frame, text="Preview Config", command=self.preview_config).pack(side="left", padx=6)
 
-        self.log_text = scrolledtext.ScrolledText(tab, height=23, wrap="word")
-        self.log_text.grid(row=3, column=0, columnspan=3, sticky="nsew", padx=8, pady=8)
+        self.log_text = scrolledtext.ScrolledText(
+            tab,
+            height=23,
+            wrap="word",
+            bg=COLOR_LOG_BG,
+            fg=COLOR_LOG_FG,
+            insertbackground=COLOR_LOG_FG,
+            relief="flat",
+            borderwidth=0,
+            font=("Consolas", 10),
+            padx=12,
+            pady=10,
+        )
+        self.log_text.grid(row=3, column=0, columnspan=3, sticky="nsew", padx=8, pady=10)
         tab.rowconfigure(3, weight=1)
 
     def browse_python(self):
@@ -383,8 +710,17 @@ class DeformConfigGui(tk.Tk):
         action_path = Path(str(self.fields.get("action_path", ConfigProxy("")).get_value()))
         key_path = Path(str(self.fields.get("key_path", ConfigProxy("")).get_value()))
 
+        if LOCAL_ACTION_FILES_DIR.exists() and (not action_path.exists() or action_path == LOCAL_ACTION_FILES_DIR):
+            action_path = LOCAL_ACTION_FILES_DIR
+            if "action_path" in self.fields:
+                self.fields["action_path"].set_value(str(LOCAL_ACTION_FILES_DIR))
+
         if "action_file" in self.fields:
-            action_files = sorted(path.name for path in action_path.glob("*.csv")) if action_path.exists() else []
+            action_files = []
+            for folder in [action_path, LOCAL_ACTION_FILES_DIR]:
+                if folder.exists():
+                    action_files.extend(path.name for path in folder.glob("*.csv"))
+            action_files = sorted(set(action_files))
             self.fields["action_file"].widget.configure(values=action_files)
 
         if "custom_key_name" in self.fields:
@@ -461,14 +797,285 @@ class DeformConfigGui(tk.Tk):
             return
 
         command = [str(python_path), str(RUNNER_PATH), "--config", str(config_path)]
-        self.log("Starting DEFORM runner:")
-        self.log(" ".join(f'"{part}"' if " " in part else part for part in command))
-        self.status_var.set("DEFORM runner is running...")
+        self.start_command(command, "Starting DEFORM runner...")
 
-        thread = threading.Thread(target=self.run_command, args=(command,), daemon=True)
+    def browse_directory_var(self, variable):
+        selected = filedialog.askdirectory(initialdir=variable.get() or str(APP_DIR))
+        if selected:
+            variable.set(selected)
+
+    def browse_file_var(self, variable, filetypes):
+        selected = filedialog.askopenfilename(
+            initialdir=str(Path(variable.get()).parent) if variable.get() else str(APP_DIR),
+            filetypes=filetypes,
+        )
+        if selected:
+            variable.set(selected)
+
+    def start_command(self, command, label, on_complete=None):
+        self.log(label)
+        self.log(" ".join(f'"{part}"' if " " in part else part for part in command))
+        self.status_var.set(label)
+        thread = threading.Thread(target=self.run_command, args=(command, on_complete), daemon=True)
         thread.start()
 
-    def run_command(self, command):
+    def parse_json_field(self, key):
+        value = self.doe_fields[key].get_value()
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
+
+    def doe_override_values(self):
+        num_hits = int(self.doe_fields["NUM_HITS"].get_value())
+        return {
+            "PROJECT_ROOT": str(Path(self.doe_project_root.get())),
+            "RUNNER_SCRIPT": str(RUNNER_PATH),
+            "BASE_CONFIG_PATH": str(Path(self.doe_base_config_path.get())),
+            "OPTIMIZATION_ROOT": str(Path(self.doe_optimization_root.get())),
+            "STUDY_NAME": self.doe_study_name.get().strip(),
+            "NUM_HITS": num_hits,
+            "PREPARE_RUNS": self.doe_fields["PREPARE_RUNS"].get_value(),
+            "EXECUTE_RUNS": self.doe_fields["EXECUTE_RUNS"].get_value(),
+            "PROCESS_RESULTS": self.doe_fields["PROCESS_RESULTS"].get_value(),
+            "PROPOSE_NEXT_CANDIDATES": self.doe_fields["PROPOSE_NEXT_CANDIDATES"].get_value(),
+            "RUN_NEXT_CANDIDATES": self.doe_fields["RUN_NEXT_CANDIDATES"].get_value(),
+            "EXECUTE_NEXT_CANDIDATES": self.doe_fields["EXECUTE_NEXT_CANDIDATES"].get_value(),
+            "PROCESS_NEXT_CANDIDATES": self.doe_fields["PROCESS_NEXT_CANDIDATES"].get_value(),
+            "COMBINE_DATASETS": self.doe_fields["COMBINE_DATASETS"].get_value(),
+            "MAKE_REPORT": self.doe_fields["MAKE_REPORT"].get_value(),
+            "APPLY_MODE": self.doe_fields["APPLY_MODE"].get_value(),
+            "N_CANDIDATES": int(self.doe_fields["N_CANDIDATES"].get_value()),
+            "RANDOM_SEED": int(self.doe_fields["RANDOM_SEED"].get_value()),
+            "MODEL_TYPE": self.doe_fields["MODEL_TYPE"].get_value(),
+            "N_RANDOM_BAYESIAN_CANDIDATES": int(self.doe_fields["N_RANDOM_BAYESIAN_CANDIDATES"].get_value()),
+            "N_NEXT_CANDIDATES": int(self.doe_fields["N_NEXT_CANDIDATES"].get_value()),
+            "NEXT_ROUND_NUMBER": int(self.doe_fields["NEXT_ROUND_NUMBER"].get_value()),
+            "MAX_ROUND_NUMBER": int(self.doe_fields["MAX_ROUND_NUMBER"].get_value()),
+            "BOUNDS": self.parse_json_field("BOUNDS"),
+            "OBJECTIVE_WEIGHTS": self.parse_json_field("OBJECTIVE_WEIGHTS"),
+            "DOE_CONFIG_OVERRIDES": {
+                "num_hits": num_hits,
+                "die_motion_mode": self.fields["die_motion_mode"].get_value() or "single_top_die",
+                "die_motion_axis": self.fields["die_motion_axis"].get_value(),
+                "apply_action_file_rules": False,
+                "position_bottom_die_before_first_hit": self.fields["die_motion_mode"].get_value() == "symmetric",
+            },
+        }
+
+    def build_doe_launcher_text(self):
+        values = self.doe_override_values()
+        doe_script = str(Path(self.doe_script_path.get()))
+        assignments = [
+            "import importlib.util",
+            "import json",
+            "from pathlib import Path",
+            "",
+            f"DOE_SCRIPT = Path({doe_script!r})",
+            "spec = importlib.util.spec_from_file_location('run_initial_doe_gui_module', DOE_SCRIPT)",
+            "module = importlib.util.module_from_spec(spec)",
+            "spec.loader.exec_module(module)",
+            "",
+        ]
+        path_keys = {"PROJECT_ROOT", "RUNNER_SCRIPT", "BASE_CONFIG_PATH", "OPTIMIZATION_ROOT"}
+        for key, value in values.items():
+            if key in path_keys:
+                assignments.append(f"module.{key} = Path({value!r})")
+            else:
+                assignments.append(f"module.{key} = {repr(value)}")
+        assignments.extend(
+            [
+                "",
+                "# Rebuild derived paths after GUI overrides.",
+                "module.CANDIDATES_CSV = module.OPTIMIZATION_ROOT / module.STUDY_NAME / 'candidates_initial.csv'",
+                "module.MANIFEST_CSV = module.OPTIMIZATION_ROOT / module.STUDY_NAME / 'manifest.csv'",
+                "module.DOE_TEMPLATE_CONFIG = module.OPTIMIZATION_ROOT / module.STUDY_NAME / 'doe_template_config.json'",
+                "module.DATASET_CSV = module.OPTIMIZATION_ROOT / module.STUDY_NAME / 'dataset.csv'",
+                "module.COMBINED_DATASET_CSV = module.OPTIMIZATION_ROOT / module.STUDY_NAME / 'dataset_all.csv'",
+                "module.NEXT_CANDIDATES_CSV = module.OPTIMIZATION_ROOT / module.STUDY_NAME / 'candidates_next.csv'",
+                "module.REPORT_DIR = module.OPTIMIZATION_ROOT / module.STUDY_NAME / 'report'",
+                "module.NEXT_STUDY_NAME = f'{module.STUDY_NAME}_round_{module.NEXT_ROUND_NUMBER:02d}'",
+                "module.NEXT_MANIFEST_CSV = module.OPTIMIZATION_ROOT / module.NEXT_STUDY_NAME / 'manifest.csv'",
+                "module.NEXT_DATASET_CSV = module.OPTIMIZATION_ROOT / module.NEXT_STUDY_NAME / 'dataset.csv'",
+                "module.NEXT_REPORT_DIR = module.OPTIMIZATION_ROOT / module.NEXT_STUDY_NAME / 'report'",
+                "",
+                "results = module.run_initial_doe()",
+                "print(json.dumps({key: str(value) for key, value in results.items()}, indent=2))",
+            ]
+        )
+        return "\n".join(assignments) + "\n"
+
+    def write_doe_launcher(self):
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        launcher_path = CONFIG_DIR / "run_initial_doe_gui_launcher.py"
+        launcher_path.write_text(self.build_doe_launcher_text(), encoding="utf-8")
+        self.log(f"Saved DOE launcher: {launcher_path}")
+        return launcher_path
+
+    def preview_doe_launcher(self):
+        try:
+            self.log(self.build_doe_launcher_text())
+        except Exception as exc:
+            messagebox.showerror("DOE launcher preview failed", str(exc))
+
+    def create_action_files_from_gui(self):
+        output_dir = Path(self.af_output_dir.get().strip() or LOCAL_ACTION_FILES_DIR)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if "action_path" in self.fields:
+            self.fields["action_path"].set_value(str(output_dir))
+
+        command = [
+            self.python_executable.get(),
+            str(ACTION_CREATOR_PATH),
+            "--base-path",
+            self.af_base_path.get().strip(),
+            "--hit-folders",
+            self.af_hit_folders.get().strip(),
+            "--output-dir",
+            str(output_dir),
+            "--output-prefix",
+            self.af_output_prefix.get().strip() or "af",
+            "--position-threshold-mm",
+            self.af_position_threshold_mm.get().strip() or "30.0",
+            "--force-sigma-multiplier",
+            self.af_force_sigma_multiplier.get().strip() or "1.5",
+        ]
+        self.start_command(
+            command,
+            "Creating action file(s) from AF load-stroke data...",
+            on_complete=self.refresh_file_dropdowns,
+        )
+
+    def run_doe_workflow(self):
+        try:
+            config_path = self.save_json_config()
+            self.doe_base_config_path.set(str(config_path))
+            launcher_path = self.write_doe_launcher()
+        except Exception as exc:
+            messagebox.showerror("DOE setup failed", str(exc))
+            return
+        command = [self.python_executable.get(), str(launcher_path)]
+        self.start_command(command, "Starting DOE workflow...")
+
+    def run_single_post_processing(self):
+        command = [
+            self.python_executable.get(),
+            str(POST_PROCESS_PATH),
+            "--config",
+            self.post_config_path.get(),
+            "--output-subdir",
+            self.fields["post_process_output_subdir"].var.get(),
+            "--damage-object",
+            self.fields["post_process_damage_object"].var.get(),
+            "--damage-step-no",
+            str(self.fields["post_process_damage_step_no"].get_value()),
+        ]
+        if self.post_run_dir.get().strip():
+            command.extend(["--run-dir", self.post_run_dir.get().strip()])
+        self.start_command(command, "Starting single-run post-processing...")
+
+    def run_doe_visualization(self):
+        command = [self.python_executable.get(), str(VISUALIZE_DOE_PATH)]
+        option_pairs = [
+            ("--study-root", self.report_study_root.get()),
+            ("--dataset", self.report_dataset_path.get()),
+            ("--manifest", self.report_manifest_path.get()),
+            ("--candidates", self.report_candidates_path.get()),
+            ("--surrogate-report", self.report_surrogate_path.get()),
+            ("--output-dir", self.report_output_dir.get()),
+        ]
+        for option, value in option_pairs:
+            if str(value).strip():
+                command.extend([option, str(value).strip()])
+        self.start_command(
+            command,
+            "Starting DOE visualization report...",
+            on_complete=self.refresh_and_show_first_plot,
+        )
+
+    def refresh_and_show_first_plot(self):
+        """Refresh generated plots and display one inside the GUI."""
+        self.use_report_folder_for_plots()
+        if self.selected_plot_file.get().strip():
+            self.show_selected_plot()
+
+    def default_plot_folder(self):
+        if self.plot_folder_path.get().strip():
+            return Path(self.plot_folder_path.get().strip())
+        if self.report_output_dir.get().strip():
+            return Path(self.report_output_dir.get().strip())
+        if self.report_study_root.get().strip():
+            return Path(self.report_study_root.get().strip()) / "report"
+        return APP_DIR
+
+    def use_report_folder_for_plots(self):
+        if self.report_output_dir.get().strip():
+            folder = Path(self.report_output_dir.get().strip())
+        else:
+            folder = Path(self.report_study_root.get().strip()) / "report"
+        self.plot_folder_path.set(str(folder))
+        self.refresh_plot_list()
+
+    def refresh_plot_list(self):
+        folder = self.default_plot_folder()
+        self.plot_folder_path.set(str(folder))
+        if not folder.exists():
+            self.plot_combo.configure(values=[])
+            self.selected_plot_file.set("")
+            self.plot_caption.set(f"Plot folder does not exist: {folder}")
+            self.log(f"Plot folder does not exist: {folder}")
+            return []
+
+        plots = sorted(folder.glob("*.png"))
+        display_names = [path.name for path in plots]
+        self.plot_combo.configure(values=display_names)
+        if display_names and self.selected_plot_file.get() not in display_names:
+            self.selected_plot_file.set(display_names[0])
+        self.plot_caption.set(f"Found {len(display_names)} plot(s) in {folder}")
+        self.log(f"Found {len(display_names)} plot(s) in {folder}")
+        return plots
+
+    def selected_plot_path(self):
+        folder = self.default_plot_folder()
+        selected = self.selected_plot_file.get().strip()
+        if not selected:
+            return None
+        return folder / selected
+
+    def show_selected_plot(self):
+        plot_path = self.selected_plot_path()
+        if plot_path is None:
+            self.refresh_plot_list()
+            plot_path = self.selected_plot_path()
+        if plot_path is None or not plot_path.exists():
+            messagebox.showwarning("Plot not found", "Select a plot after refreshing the plot list.")
+            return
+
+        try:
+            raw_image = tk.PhotoImage(file=str(plot_path))
+        except tk.TclError as exc:
+            messagebox.showerror(
+                "Could not load plot",
+                f"Tkinter could not load this image:\n{plot_path}\n\n{exc}",
+            )
+            return
+
+        max_width = 980
+        max_height = 420
+        scale = max(
+            1,
+            (raw_image.width() + max_width - 1) // max_width,
+            (raw_image.height() + max_height - 1) // max_height,
+        )
+        display_image = raw_image.subsample(scale, scale) if scale > 1 else raw_image
+        self.current_plot_raw = raw_image
+        self.current_plot_image = display_image
+        self.plot_display.configure(image=display_image, text="", bg="#0f172a")
+        self.plot_caption.set(
+            f"Showing {plot_path.name} ({raw_image.width()} x {raw_image.height()} px, scale 1/{scale})"
+        )
+        self.log(f"Showing plot: {plot_path}")
+
+    def run_command(self, command, on_complete=None):
         try:
             process = subprocess.Popen(
                 command,
@@ -483,6 +1090,8 @@ class DeformConfigGui(tk.Tk):
             return_code = process.wait()
             self.log(f"Runner exited with code {return_code}")
             self.status_var.set(f"Runner exited with code {return_code}")
+            if return_code == 0 and on_complete is not None:
+                self.after(0, on_complete)
         except Exception as exc:
             self.log(f"ERROR: {exc}")
             self.status_var.set("Runner failed to start.")
