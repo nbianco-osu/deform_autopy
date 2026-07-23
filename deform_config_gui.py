@@ -997,14 +997,23 @@ class DeformConfigGui(tk.Tk):
         tab = self.tabs["Run"]
         ttk.Label(tab, text="Python executable").grid(row=0, column=0, sticky="w", padx=(8, 4), pady=4)
         ttk.Entry(tab, textvariable=self.python_executable, width=80).grid(row=0, column=1, sticky="ew", padx=6, pady=6)
-        ttk.Button(tab, text="Browse", command=self.browse_python).grid(row=0, column=2, padx=(6, 10), pady=6)
+        python_buttons = ttk.Frame(tab, style="ButtonBar.TFrame")
+        python_buttons.grid(row=0, column=2, sticky="w", padx=(6, 10), pady=6)
+        ttk.Button(python_buttons, text="Use Current Python", command=self.use_current_python).pack(side="left", padx=(0, 6))
+        ttk.Button(python_buttons, text="Browse", command=self.browse_python).pack(side="left")
+        ttk.Label(
+            tab,
+            text="If this GUI is launched from Spyder, Use Current Python sets this field to Spyder's interpreter.",
+            style="Muted.TLabel",
+            wraplength=850,
+        ).grid(row=1, column=1, columnspan=2, sticky="w", padx=6, pady=(0, 6))
 
-        ttk.Label(tab, text="Config output path").grid(row=1, column=0, sticky="w", padx=(8, 4), pady=4)
-        ttk.Entry(tab, textvariable=self.config_output_path, width=80).grid(row=1, column=1, sticky="ew", padx=6, pady=6)
-        ttk.Button(tab, text="Browse", command=self.browse_config_output).grid(row=1, column=2, padx=(6, 10), pady=6)
+        ttk.Label(tab, text="Config output path").grid(row=2, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.config_output_path, width=80).grid(row=2, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=self.browse_config_output).grid(row=2, column=2, padx=(6, 10), pady=6)
 
         button_frame = ttk.Frame(tab, style="ButtonBar.TFrame")
-        button_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=8, pady=(8, 4))
+        button_frame.grid(row=3, column=0, columnspan=3, sticky="ew", padx=8, pady=(8, 4))
         ttk.Button(button_frame, text="Load JSON Config", command=self.load_json_config).pack(side="left", padx=(0, 6))
         ttk.Button(button_frame, text="Save JSON Config", command=self.save_json_config).pack(side="left", padx=6)
         ttk.Button(button_frame, text="Save and Run DEFORM", command=self.save_and_run, style="Success.TButton").pack(side="left", padx=6)
@@ -1023,8 +1032,18 @@ class DeformConfigGui(tk.Tk):
             padx=12,
             pady=10,
         )
-        self.log_text.grid(row=3, column=0, columnspan=3, sticky="nsew", padx=8, pady=10)
-        tab.rowconfigure(3, weight=1)
+        self.log_text.grid(row=4, column=0, columnspan=3, sticky="nsew", padx=8, pady=10)
+        tab.rowconfigure(4, weight=1)
+
+    def use_current_python(self):
+        """Use the interpreter that launched this GUI.
+
+        When the GUI is opened from Spyder, sys.executable is Spyder's active
+        Python interpreter, so this keeps DEFORM/DOE subprocesses in the same
+        environment.
+        """
+        self.python_executable.set(sys.executable)
+        self.status_var.set(f"Python executable set to current interpreter: {sys.executable}")
 
     def browse_python(self):
         selected = filedialog.askopenfilename(
