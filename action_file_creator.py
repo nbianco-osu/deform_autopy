@@ -10,6 +10,7 @@ depth to inches, and writes the DEFORM action CSV used by run_deform_hits_config
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +41,59 @@ def detect_material_from_filename(filename):
     if len(parts) > 1 and parts[1] == "316L":
         return "316L"
     return "4140"
+
+
+def extract_hit_number_from_filename(filename):
+    """Extract the physical hit number encoded in an AF filename.
+
+    AF exports are not always returned by the filesystem in hit order. Prefer an
+    explicit token such as hit1, hit_01, hit-01, or h01. If that is absent, fall
+    back to the last number in the filename, which matches many timestamp-free
+    AF naming conventions.
+    """
+    stem = Path(filename).stem
+    explicit_match = re.search(
+        r"(?:^|[^a-z0-9])(?:hit|h)\s*[-_ ]*0*(\d+)(?=$|[^a-z0-9])",
+        stem,
+        flags=re.IGNORECASE,
+    )
+    if explicit_match:
+        return int(explicit_match.group(1))
+
+    numbers = re.findall(r"\d+", stem)
+    if numbers:
+        return int(numbers[-1])
+    return None
+
+
+def sorted_af_csv_paths(hit_path):
+    """Return AF CSV files sorted by hit number from filename."""
+    csv_paths = list(Path(hit_path).glob("*.csv"))
+    parsed = [(extract_hit_number_from_filename(path.name), path) for path in csv_paths]
+    missing = [path.name for hit_number, path in parsed if hit_number is None]
+    if missing:
+        print(
+            "WARNING: Could not infer hit number from filename(s); "
+            f"falling back to filename order for: {', '.join(missing)}"
+        )
+    duplicate_hits = sorted(
+        hit_number
+        for hit_number in {hit_number for hit_number, _path in parsed if hit_number is not None}
+        if sum(1 for candidate, _path in parsed if candidate == hit_number) > 1
+    )
+    if duplicate_hits:
+        raise ValueError(
+            "Duplicate hit number(s) found in AF filenames: "
+            + ", ".join(str(hit_number) for hit_number in duplicate_hits)
+        )
+    return sorted(
+        parsed,
+        key=lambda item: (
+            item[0] is None,
+            item[0] if item[0] is not None else 0,
+            item[1].name.lower(),
+        ),
+    )
 
 
 def process_af_hit_file(csv_path, position_start_threshold_mm=30.0, force_sigma_multiplier=1.5):
@@ -126,7 +180,8 @@ def create_action_file_from_af_load_stroke(
             raise FileNotFoundError(f"AF hit folder was not found: {hit_path}")
 
         rows = []
-        for hit_number, csv_path in enumerate(sorted(hit_path.glob("*.csv")), start=1):
+        for fallback_hit_number, (parsed_hit_number, csv_path) in enumerate(sorted_af_csv_paths(hit_path), start=1):
+            hit_number = parsed_hit_number if parsed_hit_number is not None else fallback_hit_number
             print(f"Processing hit {hit_number}: {csv_path}")
             row = process_af_hit_file(
                 csv_path,
