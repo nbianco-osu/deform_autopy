@@ -11,6 +11,7 @@ import ast
 import csv
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -28,6 +29,7 @@ ACTION_CREATOR_PATH = APP_DIR / "action_file_creator.py"
 CONFIG_DIR = APP_DIR / "configs"
 LOCAL_ACTION_FILES_DIR = APP_DIR / "action_files"
 MATERIAL_LIST_PATH = APP_DIR / "material_list_deform.csv"
+MANUAL_DIR = APP_DIR / "manual"
 
 
 MATERIAL_OPTIONS = [
@@ -199,6 +201,13 @@ def set_simulation_modes_from_jmak(config):
         use_jmak = use_jmak.strip().lower() in {"true", "yes", "1", "on"}
     config["jmak_simulation_modes"] = "D H G" if use_jmak else "D H"
     return config
+
+
+def infer_action_version(action_file):
+    """Return the version tag from an action CSV filename, or v1 if absent."""
+    name = Path(str(action_file)).name
+    match = re.search(r"(?:^|[_-])(v\d+)(?:[_\-.]|$)", name, flags=re.IGNORECASE)
+    return match.group(1).lower() if match else "v1"
 
 
 class ConfigField:
@@ -400,7 +409,6 @@ class DeformConfigGui(tk.Tk):
         """Create a notebook tab without a page-level scrollbar."""
         outer = ttk.Frame(notebook, padding=18, style="Card.TFrame")
         outer.columnconfigure(1, weight=1)
-        outer.rowconfigure(3, weight=1)
         notebook.add(outer, text=name)
         return outer
 
@@ -411,9 +419,8 @@ class DeformConfigGui(tk.Tk):
         header = ttk.Frame(self, padding=(18, 14), style="Hero.TFrame")
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(1, weight=1)
-        ttk.Label(header, text="Jobs", style="HeroTitle.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(header, text="Shared / DEFORM Automation / Multihit Job", style="HeroSubtitle.TLabel").grid(row=1, column=0, sticky="w", pady=(5, 0))
-        ttk.Label(header, text="Job ID: deform-gui", style="HeroSubtitle.TLabel").grid(row=0, column=2, sticky="e", padx=(10, 0))
+        ttk.Label(header, text="DEFORM Automation - Multihit DEFORM Job", style="HeroSubtitle.TLabel").grid(row=1, column=0, sticky="w", pady=(5, 0))
+        ttk.Button(header, text="Open Manuals", command=self.open_manuals).grid(row=0, column=2, rowspan=2, sticky="e", padx=(12, 0))
 
         workspace = ttk.Frame(self, style="App.TFrame")
         workspace.grid(row=1, column=0, sticky="nsew")
@@ -511,6 +518,7 @@ class DeformConfigGui(tk.Tk):
         self.add_field("Paths", "Key folder", "key_path", 0, browse="directory")
         self.add_field("Paths", "Action folder", "action_path", 1, browse="directory")
         self.add_field("Paths", "Action CSV", "action_file", 2, kind="combo", options=[])
+        self.fields["action_file"].widget.bind("<<ComboboxSelected>>", self.on_action_file_changed)
         self.add_field("Paths", "Output run folder", "data_path", 3, browse="directory")
         self.add_field("Paths", "Use custom key", "custom_key_bool", 4, kind="combo_bool", options=BOOLEAN_OPTIONS)
         self.add_field("Paths", "Custom key file", "custom_key_name", 5, kind="combo", options=[], browse="file")
@@ -528,15 +536,15 @@ class DeformConfigGui(tk.Tk):
         self.add_field("Run Setup", "Die motion axis", "die_motion_axis", 5, kind="combo", options=DIE_AXIS_OPTIONS)
         self.add_field("Run Setup", "Position dies before first hit", "position_dies_before_first_hit", 6, kind="combo_bool", options=BOOLEAN_OPTIONS)
         self.add_field("Run Setup", "Position bottom die before first hit", "position_bottom_die_before_first_hit", 7, kind="combo_bool", options=BOOLEAN_OPTIONS)
-        self.add_field("Run Setup", "Height / die backout", "height", 8)
-        self.add_field("Run Setup", "Time step", "time_step", 9)
+        self.add_field("Run Setup", "Height / Die Backout [in]", "height", 8)
+        self.add_field("Run Setup", "Time Step [s]", "time_step", 9)
         self.add_field("Run Setup", "Save step size", "save_step_size", 10)
-        self.add_field("Run Setup", "Top die interference", "top_die_interference", 11)
-        self.add_field("Run Setup", "Bottom die interference", "bottom_die_interference", 12)
+        self.add_field("Run Setup", "Top Die Interference [in]", "top_die_interference", 11)
+        self.add_field("Run Setup", "Bottom Die Interference [in]", "bottom_die_interference", 12)
         self.add_field("Run Setup", "Bottom die retract speed multiplier", "bottom_die_retract_speed_multiplier", 13)
         self.add_field("Run Setup", "Bottom die retract lead steps", "bottom_die_retract_lead_steps", 14)
         self.add_field("Run Setup", "Mesh type", "mesh_type", 15, kind="combo", options=MESH_OPTIONS)
-        self.add_field("Run Setup", "Stock diameter", "stock_diameter", 16)
+        self.add_field("Run Setup", "Stock Diameter [in]", "stock_diameter", 16, kind="combo", options=["0.625", "1"])
 
         ttk.Button(self.tabs["Run Setup"], text="Apply bdm/single-die rule now", command=self.apply_action_rule_preview, style="Accent.TButton").grid(
             row=17, column=1, sticky="w", padx=4, pady=(10, 4)
@@ -580,7 +588,7 @@ class DeformConfigGui(tk.Tk):
         self.add_field("Material/JMAK", "JMAK simulation modes", "jmak_simulation_modes", 10, kind="combo", options=["D H G", "D H"])
         self.fields["use_jmak"].widget.bind("<<ComboboxSelected>>", self.update_jmak_simulation_modes)
         self.fields["jmak_simulation_modes"].widget.configure(state="readonly")
-        self.add_field("Material/JMAK", "Mean grain size, um", "mean_grain_size_um", 11)
+        self.add_field("Material/JMAK", "Mean Grain Size [um]", "mean_grain_size_um", 11)
         self.update_jmak_simulation_modes()
         self.add_field("Material/JMAK", "Enable lag time", "enable_lag_time", 12, kind="combo_bool", options=BOOLEAN_OPTIONS)
 
@@ -702,19 +710,34 @@ class DeformConfigGui(tk.Tk):
             wraplength=900,
         ).grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 14))
 
+        ttk.Label(tab, text="AF data root folder", style="Muted.TLabel").grid(row=1, column=0, sticky="w", padx=(12, 12), pady=7)
+        ttk.Entry(tab, textvariable=self.af_base_path, width=70).grid(row=1, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=self.browse_af_data_folder).grid(row=1, column=2, padx=(6, 10), pady=6)
+
+        ttk.Label(tab, text="Hit folders", style="Muted.TLabel").grid(row=2, column=0, sticky="w", padx=(12, 12), pady=7)
+        self.af_hit_folders_combo = ttk.Combobox(tab, textvariable=self.af_hit_folders, values=[], width=67)
+        self.af_hit_folders_combo.grid(row=2, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Refresh", command=self.populate_af_hit_folders).grid(row=2, column=2, padx=(6, 10), pady=6)
+
         rows = [
-            ("AF data root folder", self.af_base_path, "directory"),
-            ("Hit folders", self.af_hit_folders, None),
             ("Output action_files folder", self.af_output_dir, "directory"),
             ("Output filename prefix", self.af_output_prefix, None),
-            ("Position threshold, mm", self.af_position_threshold_mm, None),
-            ("Force sigma multiplier", self.af_force_sigma_multiplier, None),
+            ("Position Threshold [mm]", self.af_position_threshold_mm, None),
         ]
-        for index, (label, variable, browse_type) in enumerate(rows, start=1):
+        for index, (label, variable, browse_type) in enumerate(rows, start=3):
             ttk.Label(tab, text=label, style="Muted.TLabel").grid(row=index, column=0, sticky="w", padx=(12, 12), pady=7)
             ttk.Entry(tab, textvariable=variable, width=70).grid(row=index, column=1, sticky="ew", padx=6, pady=6)
             if browse_type == "directory":
                 ttk.Button(tab, text="Browse", command=lambda var=variable: self.browse_directory_var(var)).grid(row=index, column=2, padx=(6, 10), pady=6)
+
+        self.populate_af_hit_folders()
+
+        ttk.Label(
+            tab,
+            text="Threshold should be roughly 20% larger than the initial workpiece diameter.",
+            style="Muted.TLabel",
+            wraplength=820,
+        ).grid(row=6, column=1, columnspan=2, sticky="w", padx=6, pady=(0, 8))
 
         ttk.Label(
             tab,
@@ -727,6 +750,46 @@ class DeformConfigGui(tk.Tk):
         button_frame.grid(row=8, column=1, sticky="w", padx=6, pady=(8, 4))
         ttk.Button(button_frame, text="Create Action File(s)", command=self.create_action_files_from_gui, style="Accent.TButton").pack(side="left", padx=(0, 6))
         ttk.Button(button_frame, text="Refresh Action Dropdown", command=self.refresh_file_dropdowns).pack(side="left", padx=6)
+
+    def split_af_data_selection(self, selected_folder):
+        """Split a selected path into the AF Data root and relative hit folder."""
+        selected = Path(selected_folder)
+        parts_lower = [part.lower() for part in selected.parts]
+        if "af data" not in parts_lower:
+            return selected, ""
+        af_index = parts_lower.index("af data")
+        af_root = Path(*selected.parts[: af_index + 1])
+        hit_parts = selected.parts[af_index + 1 :]
+        hit_folder = str(Path(*hit_parts)) if hit_parts else ""
+        return af_root, hit_folder
+
+    def populate_af_hit_folders(self):
+        """Populate the Hit folders dropdown from subfolders under AF Data."""
+        if not hasattr(self, "af_hit_folders_combo"):
+            return
+        af_root = Path(self.af_base_path.get().strip())
+        folders = []
+        if af_root.exists():
+            folders = sorted(path.name for path in af_root.iterdir() if path.is_dir())
+        self.af_hit_folders_combo.configure(values=folders)
+        if folders and self.af_hit_folders.get().strip() not in folders:
+            self.af_hit_folders.set(folders[0])
+
+    def browse_af_data_folder(self):
+        """Browse to AF Data or a child folder and derive the hit folder choice."""
+        selected = filedialog.askdirectory(initialdir=self.af_base_path.get() or str(APP_DIR))
+        if not selected:
+            return
+        af_root, hit_folder = self.split_af_data_selection(selected)
+        self.af_base_path.set(str(af_root))
+        self.populate_af_hit_folders()
+        if hit_folder:
+            current_values = list(self.af_hit_folders_combo.cget("values"))
+            if hit_folder not in current_values:
+                current_values.insert(0, hit_folder)
+                self.af_hit_folders_combo.configure(values=current_values)
+            self.af_hit_folders.set(hit_folder)
+        self.status_var.set(f"AF data folder set to {self.af_base_path.get()}.")
 
     def add_doe_field(self, label, key, value, row, kind="entry", options=None):
         field = ConfigField(
@@ -932,9 +995,28 @@ class DeformConfigGui(tk.Tk):
             key_files = sorted(path.name for path in key_path.glob("*.key")) if key_path.exists() else []
             self.fields["custom_key_name"].widget.configure(values=key_files)
 
+        self.update_action_version_from_csv()
         self.status_var.set("File dropdowns refreshed.")
 
+    def update_action_version_from_csv(self):
+        """Populate action_version from the selected action CSV filename."""
+        if "action_version" not in self.fields:
+            return
+        action_file = ""
+        if "action_file" in self.fields:
+            action_file = self.fields["action_file"].get_value()
+        self.fields["action_version"].set_value(infer_action_version(action_file))
+
+    def on_action_file_changed(self, _event=None):
+        """Refresh derived fields that depend on the selected action CSV."""
+        self.update_action_version_from_csv()
+        if "apply_action_file_rules" in self.fields and self.fields["apply_action_file_rules"].get_value():
+            self.apply_action_rule_preview()
+        else:
+            self.status_var.set(f"Action version set to {self.fields['action_version'].get_value()}.")
+
     def apply_action_rule_preview(self):
+        self.update_action_version_from_csv()
         action_file = Path(str(self.fields["action_file"].get_value())).name.lower()
         if "bdm" in action_file:
             self.fields["die_motion_mode"].set_value("symmetric")
@@ -946,6 +1028,7 @@ class DeformConfigGui(tk.Tk):
             self.status_var.set("Applied single-die rule: single_top_die and no bottom-die hit-0 positioning.")
 
     def build_config(self):
+        self.update_action_version_from_csv()
         config = dict(self.default_config)
         for key, field in self.fields.items():
             config[key] = field.get_value()
@@ -979,6 +1062,7 @@ class DeformConfigGui(tk.Tk):
         self.refresh_short_material_labels()
         self.update_jmak_simulation_modes()
         self.refresh_file_dropdowns()
+        self.update_action_version_from_csv()
 
     def save_json_config(self):
         config = self.build_config()
@@ -1023,6 +1107,13 @@ class DeformConfigGui(tk.Tk):
         selected = filedialog.askdirectory(initialdir=variable.get() or str(APP_DIR))
         if selected:
             variable.set(selected)
+
+    def open_manuals(self):
+        """Open the generated manuals folder in Windows Explorer."""
+        if not MANUAL_DIR.exists():
+            messagebox.showwarning("Manuals not found", f"Could not find:\n{MANUAL_DIR}")
+            return
+        os.startfile(str(MANUAL_DIR))
 
     def browse_file_var(self, variable, filetypes):
         selected = filedialog.askopenfilename(
@@ -1156,8 +1247,6 @@ class DeformConfigGui(tk.Tk):
             self.af_output_prefix.get().strip() or "af",
             "--position-threshold-mm",
             self.af_position_threshold_mm.get().strip() or "30.0",
-            "--force-sigma-multiplier",
-            self.af_force_sigma_multiplier.get().strip() or "1.5",
         ]
         self.start_command(
             command,
