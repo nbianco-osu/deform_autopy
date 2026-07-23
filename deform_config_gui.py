@@ -45,6 +45,17 @@ DIE_MOTION_OPTIONS = ["", "single_top_die", "symmetric"]
 DIE_AXIS_OPTIONS = ["z", "y"]
 MESH_OPTIONS = ["coarse", "fine"]
 BOOLEAN_OPTIONS = ["true", "false"]
+DOE_FLAG_KEYS = [
+    "PREPARE_RUNS",
+    "EXECUTE_RUNS",
+    "PROCESS_RESULTS",
+    "PROPOSE_NEXT_CANDIDATES",
+    "RUN_NEXT_CANDIDATES",
+    "EXECUTE_NEXT_CANDIDATES",
+    "PROCESS_NEXT_CANDIDATES",
+    "COMBINE_DATASETS",
+    "MAKE_REPORT",
+]
 
 FONT_FAMILY = "Segoe UI"
 COLOR_BG = "#f7f8fb"
@@ -292,6 +303,8 @@ class DeformConfigGui(tk.Tk):
         self.doe_base_config_path = tk.StringVar(value=str(CONFIG_DIR / "run_deform_hits_gui_config.json"))
         self.doe_optimization_root = tk.StringVar(value=str(APP_DIR / "optimization"))
         self.doe_study_name = tk.StringVar(value="single_die_5hit_initial_doe")
+        self.doe_protocol_stage = tk.StringVar(value="1. Prepare initial DOE inputs")
+        self.doe_artifact_items = []
 
         self.post_config_path = tk.StringVar(value=str(CONFIG_DIR / "run_deform_hits_gui_config.json"))
         self.post_run_dir = tk.StringVar(value="")
@@ -806,52 +819,109 @@ class DeformConfigGui(tk.Tk):
 
     def build_doe_tab(self):
         tab = self.tabs["DOE"]
-        ttk.Label(tab, text="DOE script").grid(row=0, column=0, sticky="w", padx=(8, 4), pady=4)
-        ttk.Entry(tab, textvariable=self.doe_script_path, width=70).grid(row=0, column=1, sticky="ew", padx=6, pady=6)
-        ttk.Button(tab, text="Browse", command=lambda: self.browse_file_var(self.doe_script_path, [("Python", "*.py"), ("All files", "*.*")])).grid(row=0, column=2, padx=(6, 10), pady=6)
+        ttk.Label(
+            tab,
+            text="Use the DOE workflow in staged passes. Prepare files first, inspect them, then execute or process the next stage.",
+            style="Section.TLabel",
+            wraplength=900,
+        ).grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 14))
 
-        ttk.Label(tab, text="Project root").grid(row=1, column=0, sticky="w", padx=(8, 4), pady=4)
-        ttk.Entry(tab, textvariable=self.doe_project_root, width=70).grid(row=1, column=1, sticky="ew", padx=6, pady=6)
-        ttk.Button(tab, text="Browse", command=lambda: self.browse_directory_var(self.doe_project_root)).grid(row=1, column=2, padx=(6, 10), pady=6)
+        ttk.Label(tab, text="DOE script").grid(row=1, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.doe_script_path, width=70).grid(row=1, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=lambda: self.browse_file_var(self.doe_script_path, [("Python", "*.py"), ("All files", "*.*")])).grid(row=1, column=2, padx=(6, 10), pady=6)
 
-        ttk.Label(tab, text="Base config JSON").grid(row=2, column=0, sticky="w", padx=(8, 4), pady=4)
-        ttk.Entry(tab, textvariable=self.doe_base_config_path, width=70).grid(row=2, column=1, sticky="ew", padx=6, pady=6)
-        ttk.Button(tab, text="Browse", command=lambda: self.browse_file_var(self.doe_base_config_path, [("JSON", "*.json"), ("All files", "*.*")])).grid(row=2, column=2, padx=(6, 10), pady=6)
+        ttk.Label(tab, text="Project root").grid(row=2, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.doe_project_root, width=70).grid(row=2, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=lambda: self.browse_directory_var(self.doe_project_root)).grid(row=2, column=2, padx=(6, 10), pady=6)
 
-        ttk.Label(tab, text="Optimization root").grid(row=3, column=0, sticky="w", padx=(8, 4), pady=4)
-        ttk.Entry(tab, textvariable=self.doe_optimization_root, width=70).grid(row=3, column=1, sticky="ew", padx=6, pady=6)
-        ttk.Button(tab, text="Browse", command=lambda: self.browse_directory_var(self.doe_optimization_root)).grid(row=3, column=2, padx=(6, 10), pady=6)
+        ttk.Label(tab, text="Base config JSON").grid(row=3, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.doe_base_config_path, width=70).grid(row=3, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=lambda: self.browse_file_var(self.doe_base_config_path, [("JSON", "*.json"), ("All files", "*.*")])).grid(row=3, column=2, padx=(6, 10), pady=6)
 
-        ttk.Label(tab, text="Study name").grid(row=4, column=0, sticky="w", padx=(8, 4), pady=4)
-        ttk.Entry(tab, textvariable=self.doe_study_name, width=70).grid(row=4, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Label(tab, text="Optimization root").grid(row=4, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.doe_optimization_root, width=70).grid(row=4, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Button(tab, text="Browse", command=lambda: self.browse_directory_var(self.doe_optimization_root)).grid(row=4, column=2, padx=(6, 10), pady=6)
 
-        self.add_doe_field("Prepare runs", "PREPARE_RUNS", False, 5, kind="combo_bool", options=BOOLEAN_OPTIONS)
-        self.add_doe_field("Execute runs", "EXECUTE_RUNS", False, 6, kind="combo_bool", options=BOOLEAN_OPTIONS)
-        self.add_doe_field("Process results", "PROCESS_RESULTS", False, 7, kind="combo_bool", options=BOOLEAN_OPTIONS)
-        self.add_doe_field("Propose next candidates", "PROPOSE_NEXT_CANDIDATES", False, 8, kind="combo_bool", options=BOOLEAN_OPTIONS)
-        self.add_doe_field("Run next candidates", "RUN_NEXT_CANDIDATES", False, 9, kind="combo_bool", options=BOOLEAN_OPTIONS)
-        self.add_doe_field("Execute next candidates", "EXECUTE_NEXT_CANDIDATES", False, 10, kind="combo_bool", options=BOOLEAN_OPTIONS)
-        self.add_doe_field("Process next candidates", "PROCESS_NEXT_CANDIDATES", False, 11, kind="combo_bool", options=BOOLEAN_OPTIONS)
-        self.add_doe_field("Combine datasets", "COMBINE_DATASETS", False, 12, kind="combo_bool", options=BOOLEAN_OPTIONS)
-        self.add_doe_field("Make report", "MAKE_REPORT", False, 13, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        ttk.Label(tab, text="Study name").grid(row=5, column=0, sticky="w", padx=(8, 4), pady=4)
+        ttk.Entry(tab, textvariable=self.doe_study_name, width=70).grid(row=5, column=1, sticky="ew", padx=6, pady=6)
 
-        self.add_doe_field("Number of hits", "NUM_HITS", 5, 14)
-        self.add_doe_field("Initial candidates", "N_CANDIDATES", 100, 15)
-        self.add_doe_field("Random seed", "RANDOM_SEED", 1, 16)
-        self.add_doe_field("Apply mode", "APPLY_MODE", "all_rows", 17, kind="combo", options=["all_rows", "hit_row"])
-        self.add_doe_field("Model type", "MODEL_TYPE", "random_forest", 18, kind="combo", options=["random_forest", "gaussian_process"])
-        self.add_doe_field("Next candidates", "N_NEXT_CANDIDATES", 5, 19)
-        self.add_doe_field("Random Bayesian candidates", "N_RANDOM_BAYESIAN_CANDIDATES", 2000, 20)
-        self.add_doe_field("Next round number", "NEXT_ROUND_NUMBER", 2, 21)
-        self.add_doe_field("Max round number", "MAX_ROUND_NUMBER", 2, 22)
-        self.add_doe_field("Bounds JSON", "BOUNDS", '{"depth_in": [0.01, 0.15], "forging_temp_c": [900, 1200]}', 23)
-        self.add_doe_field("Objective weights JSON", "OBJECTIVE_WEIGHTS", '{"damage_max": 10.0, "grain_std_um": 10.0, "top_die_center_distance": 10.0, "bottom_die_center_distance": 10.0}', 24)
+        ttk.Label(tab, text="DOE protocol stage", style="Muted.TLabel").grid(row=6, column=0, sticky="w", padx=(8, 4), pady=7)
+        protocol_options = list(self.doe_protocol_map().keys())
+        self.doe_protocol_combo = ttk.Combobox(tab, textvariable=self.doe_protocol_stage, values=protocol_options, width=67, state="readonly")
+        self.doe_protocol_combo.grid(row=6, column=1, sticky="ew", padx=6, pady=6)
+        self.doe_protocol_combo.bind("<<ComboboxSelected>>", self.apply_doe_protocol_stage)
+        ttk.Button(tab, text="Apply Stage", command=self.apply_doe_protocol_stage).grid(row=6, column=2, padx=(6, 10), pady=6)
+
+        ttk.Label(
+            tab,
+            text="Protocol-set flags below show what will run for the selected stage.",
+            style="Muted.TLabel",
+            wraplength=900,
+        ).grid(row=7, column=0, columnspan=3, sticky="w", padx=8, pady=(6, 4))
+
+        self.add_doe_field("Prepare runs", "PREPARE_RUNS", False, 8, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Execute runs", "EXECUTE_RUNS", False, 9, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Process results", "PROCESS_RESULTS", False, 10, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Propose next candidates", "PROPOSE_NEXT_CANDIDATES", False, 11, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Run next candidates", "RUN_NEXT_CANDIDATES", False, 12, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Execute next candidates", "EXECUTE_NEXT_CANDIDATES", False, 13, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Process next candidates", "PROCESS_NEXT_CANDIDATES", False, 14, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Combine datasets", "COMBINE_DATASETS", False, 15, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Make report", "MAKE_REPORT", False, 16, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.lock_doe_protocol_flags()
+
+        self.add_doe_field("Number of hits", "NUM_HITS", 5, 17)
+        self.add_doe_field("Initial candidates", "N_CANDIDATES", 100, 18)
+        self.add_doe_field("Random seed", "RANDOM_SEED", 1, 19)
+        self.add_doe_field("Apply mode", "APPLY_MODE", "all_rows", 20, kind="combo", options=["all_rows", "hit_row"])
+        self.add_doe_field("Model type", "MODEL_TYPE", "random_forest", 21, kind="combo", options=["random_forest", "gaussian_process"])
+        self.add_doe_field("Next candidates", "N_NEXT_CANDIDATES", 5, 22)
+        self.add_doe_field("Random Bayesian candidates", "N_RANDOM_BAYESIAN_CANDIDATES", 2000, 23)
+        self.add_doe_field("Next round number", "NEXT_ROUND_NUMBER", 2, 24)
+        self.add_doe_field("Max round number", "MAX_ROUND_NUMBER", 2, 25)
+        self.add_doe_field("Bounds JSON", "BOUNDS", '{"depth_in": [0.01, 0.15], "forging_temp_c": [900, 1200]}', 26)
+        self.add_doe_field("Objective weights JSON", "OBJECTIVE_WEIGHTS", '{"damage_max": 10.0, "grain_std_um": 10.0, "top_die_center_distance": 10.0, "bottom_die_center_distance": 10.0}', 27)
+
+        self.apply_doe_protocol_stage()
 
         button_frame = ttk.Frame(tab, style="ButtonBar.TFrame")
-        button_frame.grid(row=25, column=0, columnspan=3, sticky="ew", padx=8, pady=(10, 4))
+        button_frame.grid(row=28, column=1, sticky="ew", padx=6, pady=(10, 4))
         ttk.Button(button_frame, text="Save Current Run Config for DOE", command=self.save_json_config).pack(side="left", padx=(0, 6))
-        ttk.Button(button_frame, text="Run DOE Workflow", command=self.run_doe_workflow, style="Accent.TButton").pack(side="left", padx=6)
+        ttk.Button(button_frame, text="Run DOE Stage", command=self.run_doe_workflow, style="Accent.TButton").pack(side="left", padx=6)
         ttk.Button(button_frame, text="Preview DOE Launcher", command=self.preview_doe_launcher).pack(side="left", padx=6)
+
+        ttk.Separator(tab, orient="horizontal").grid(row=29, column=0, columnspan=3, sticky="ew", pady=10)
+        ttk.Label(tab, text="Examine DOE files", style="Section.TLabel").grid(row=30, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 8))
+        ttk.Label(
+            tab,
+            text="Refresh this list after each stage. Select a file or folder and open it to inspect generated candidates, configs, manifests, datasets, or reports.",
+            style="Muted.TLabel",
+            wraplength=900,
+        ).grid(row=31, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 8))
+
+        self.doe_artifact_listbox = tk.Listbox(
+            tab,
+            height=12,
+            bg="#ffffff",
+            fg=COLOR_TEXT,
+            selectbackground="#dff0fa",
+            selectforeground=COLOR_TEXT,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=COLOR_BORDER,
+            font=(FONT_FAMILY, 10),
+        )
+        self.doe_artifact_listbox.grid(row=32, column=0, columnspan=3, sticky="nsew", padx=8, pady=(0, 8))
+        tab.rowconfigure(32, weight=1)
+
+        file_button_frame = ttk.Frame(tab, style="ButtonBar.TFrame")
+        file_button_frame.grid(row=33, column=1, sticky="w", padx=6, pady=(0, 8))
+        ttk.Button(file_button_frame, text="Refresh DOE Files", command=self.refresh_doe_artifacts).pack(side="left", padx=(0, 6))
+        ttk.Button(file_button_frame, text="Open Selected", command=self.open_selected_doe_artifact).pack(side="left", padx=6)
+        ttk.Button(file_button_frame, text="Open Study Folder", command=lambda: self.open_path_if_exists(self.doe_study_dir())).pack(side="left", padx=6)
+        ttk.Button(file_button_frame, text="Open Inputs Folder", command=lambda: self.open_path_if_exists(self.doe_study_dir() / "inputs")).pack(side="left", padx=6)
+        ttk.Button(file_button_frame, text="Open Report", command=lambda: self.open_path_if_exists(self.doe_study_dir() / "report" / "index.html")).pack(side="left", padx=6)
+        self.refresh_doe_artifacts()
 
     def build_post_reports_tab(self):
         tab = self.tabs["Post/Reports"]
@@ -1130,6 +1200,125 @@ class DeformConfigGui(tk.Tk):
         thread = threading.Thread(target=self.run_command, args=(command, on_complete), daemon=True)
         thread.start()
 
+    def doe_protocol_map(self):
+        """Return safe staged DOE flag presets."""
+        return {
+            "1. Prepare initial DOE inputs": {
+                "PREPARE_RUNS": True,
+            },
+            "2. Execute initial DOE runs": {
+                "PREPARE_RUNS": True,
+                "EXECUTE_RUNS": True,
+            },
+            "3. Process results and propose next candidates": {
+                "PROCESS_RESULTS": True,
+                "PROPOSE_NEXT_CANDIDATES": True,
+            },
+            "4. Make initial DOE report": {
+                "MAKE_REPORT": True,
+            },
+            "5. Prepare next-candidate batch": {
+                "RUN_NEXT_CANDIDATES": True,
+            },
+            "6. Execute next-candidate batch": {
+                "RUN_NEXT_CANDIDATES": True,
+                "EXECUTE_NEXT_CANDIDATES": True,
+            },
+            "7. Process next batch and combine datasets": {
+                "PROCESS_NEXT_CANDIDATES": True,
+                "COMBINE_DATASETS": True,
+            },
+            "8. Propose/report after next batch": {
+                "PROPOSE_NEXT_CANDIDATES": True,
+                "MAKE_REPORT": True,
+            },
+        }
+
+    def lock_doe_protocol_flags(self):
+        """Show DOE stage booleans without allowing direct edits."""
+        for key in DOE_FLAG_KEYS:
+            if key in self.doe_fields:
+                self.doe_fields[key].widget.configure(state="disabled")
+
+    def apply_doe_protocol_stage(self, _event=None):
+        """Apply the selected DOE protocol stage to the underlying flag fields."""
+        if not self.doe_fields:
+            return
+        for key in DOE_FLAG_KEYS:
+            if key in self.doe_fields:
+                self.doe_fields[key].set_value(False)
+        stage = self.doe_protocol_stage.get()
+        for key, value in self.doe_protocol_map().get(stage, {}).items():
+            if key in self.doe_fields:
+                self.doe_fields[key].set_value(value)
+        if _event is not None:
+            self.status_var.set(f"Applied DOE protocol stage: {stage}")
+
+    def doe_study_dir(self):
+        """Return the active initial DOE study folder."""
+        return Path(self.doe_optimization_root.get().strip()) / self.doe_study_name.get().strip()
+
+    def doe_next_study_dir(self):
+        """Return the configured next-round DOE study folder."""
+        try:
+            round_number = int(self.doe_fields["NEXT_ROUND_NUMBER"].get_value())
+        except Exception:
+            round_number = 2
+        return Path(self.doe_optimization_root.get().strip()) / f"{self.doe_study_name.get().strip()}_round_{round_number:02d}"
+
+    def doe_artifact_paths(self):
+        """List DOE folders/files users commonly need to inspect between stages."""
+        study = self.doe_study_dir()
+        next_study = self.doe_next_study_dir()
+        return [
+            ("Study folder", study),
+            ("Generated inputs folder", study / "inputs"),
+            ("Initial candidates", study / "candidates_initial.csv"),
+            ("Initial manifest", study / "manifest.csv"),
+            ("DOE template config", study / "doe_template_config.json"),
+            ("Initial dataset", study / "dataset.csv"),
+            ("Combined dataset", study / "dataset_all.csv"),
+            ("Next candidates", study / "candidates_next.csv"),
+            ("Surrogate report", study / "surrogate_report.json"),
+            ("Initial report", study / "report" / "index.html"),
+            ("Initial report folder", study / "report"),
+            ("Next-round folder", next_study),
+            ("Next-round inputs folder", next_study / "inputs"),
+            ("Next-round manifest", next_study / "manifest.csv"),
+            ("Next-round dataset", next_study / "dataset.csv"),
+            ("Next-round report", next_study / "report" / "index.html"),
+        ]
+
+    def refresh_doe_artifacts(self):
+        """Refresh the DOE artifact list with exists/missing status."""
+        if not hasattr(self, "doe_artifact_listbox"):
+            return
+        self.doe_artifact_items = self.doe_artifact_paths()
+        self.doe_artifact_listbox.delete(0, "end")
+        for label, path in self.doe_artifact_items:
+            status = "exists" if Path(path).exists() else "missing"
+            self.doe_artifact_listbox.insert("end", f"[{status}] {label}: {path}")
+        self.status_var.set("DOE file list refreshed.")
+
+    def open_path_if_exists(self, path):
+        """Open a DOE file/folder if it exists; otherwise show a helpful warning."""
+        path = Path(path)
+        if not path.exists():
+            messagebox.showwarning("DOE file not found", f"Could not find:\n{path}")
+            return
+        os.startfile(str(path))
+
+    def open_selected_doe_artifact(self):
+        """Open the selected DOE artifact from the listbox."""
+        if not hasattr(self, "doe_artifact_listbox"):
+            return
+        selection = self.doe_artifact_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No DOE file selected", "Select a DOE file or folder first.")
+            return
+        _label, path = self.doe_artifact_items[selection[0]]
+        self.open_path_if_exists(path)
+
     def parse_json_field(self, key):
         value = self.doe_fields[key].get_value()
         if isinstance(value, str):
@@ -1176,12 +1365,19 @@ class DeformConfigGui(tk.Tk):
     def build_doe_launcher_text(self):
         values = self.doe_override_values()
         doe_script = str(Path(self.doe_script_path.get()))
+        project_root = str(Path(values["PROJECT_ROOT"]))
         assignments = [
             "import importlib.util",
             "import json",
+            "import sys",
             "from pathlib import Path",
             "",
+            f"PROJECT_ROOT = Path({project_root!r})",
             f"DOE_SCRIPT = Path({doe_script!r})",
+            "for import_path in [PROJECT_ROOT, DOE_SCRIPT.parent]:",
+            "    import_path_text = str(import_path)",
+            "    if import_path_text not in sys.path:",
+            "        sys.path.insert(0, import_path_text)",
             "spec = importlib.util.spec_from_file_location('run_initial_doe_gui_module', DOE_SCRIPT)",
             "module = importlib.util.module_from_spec(spec)",
             "spec.loader.exec_module(module)",
@@ -1263,7 +1459,7 @@ class DeformConfigGui(tk.Tk):
             messagebox.showerror("DOE setup failed", str(exc))
             return
         command = [self.python_executable.get(), str(launcher_path)]
-        self.start_command(command, "Starting DOE workflow...")
+        self.start_command(command, "Starting DOE workflow...", on_complete=self.refresh_doe_artifacts)
 
     def run_single_post_processing(self):
         command = [
