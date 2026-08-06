@@ -63,6 +63,13 @@ PREPARE_RUNS = False
 # Safety switch. Keep False until generated inputs have been inspected.
 EXECUTE_RUNS = False
 
+# DOE execution controls. Keep MAX_PARALLEL_RUNS = 1 for the original
+# Spyder-friendly direct mode. Set MAX_PARALLEL_RUNS > 1 to run candidates
+# concurrently through subprocesses. Start small, for example 2, to avoid
+# oversubscribing DEFORM licenses, CPU cores, or RAM.
+EXECUTE_MODE = "direct"
+MAX_PARALLEL_RUNS = 1
+
 # Process completed runs after execution. You can also set EXECUTE_RUNS = False
 # and PROCESS_RESULTS = True to process runs that already finished previously.
 PROCESS_RESULTS = False
@@ -119,6 +126,13 @@ OBJECTIVE_WEIGHTS = {
     "bottom_die_center_distance": 10.0,
 }
 
+# Experimental-data fitting. When FIT_EXPERIMENTAL_DATA is true, provide a CSV
+# or JSON file with target metrics. CSV columns: metric,target, optional weight,
+# optional tolerance. Add "expfit_total_abs_error": 1.0 to OBJECTIVE_WEIGHTS to
+# optimize agreement with those targets.
+FIT_EXPERIMENTAL_DATA = False
+EXPERIMENTAL_TARGETS_PATH = None
+
 # Result-processing settings.
 PROCESS_STATUSES = ("completed",)
 PROCESSED_OUTPUT_SUBDIR = "processed"
@@ -169,6 +183,15 @@ def write_json(data, path):
         json.dump(data, file, indent=2)
     return path
 
+
+
+def load_experimental_targets_if_enabled():
+    """Return the configured experimental targets path only when enabled."""
+    if not FIT_EXPERIMENTAL_DATA:
+        return None
+    if EXPERIMENTAL_TARGETS_PATH in (None, ""):
+        raise ValueError("FIT_EXPERIMENTAL_DATA is true, but EXPERIMENTAL_TARGETS_PATH is not set.")
+    return EXPERIMENTAL_TARGETS_PATH
 
 def create_doe_template_config(base_config_path, output_config_path, overrides):
     """Create the config used by all generated DOE candidates."""
@@ -241,6 +264,8 @@ def run_initial_doe():
             runner_script=RUNNER_SCRIPT,
             apply_mode=APPLY_MODE,
             execute=EXECUTE_RUNS,
+            execute_mode=EXECUTE_MODE,
+            max_parallel_runs=MAX_PARALLEL_RUNS,
         )
 
         print(f"Prepared {len(planned_runs)} DOE run(s).")
@@ -271,6 +296,7 @@ def run_initial_doe():
             manifest_path=MANIFEST_CSV,
             dataset_path=DATASET_CSV,
             objective_weights=OBJECTIVE_WEIGHTS,
+            experimental_targets=load_experimental_targets_if_enabled(),
             statuses=PROCESS_STATUSES,
             output_subdir=PROCESSED_OUTPUT_SUBDIR,
             damage_object=DAMAGE_OBJECT,
@@ -305,6 +331,8 @@ def run_initial_doe():
                 runner_script=RUNNER_SCRIPT,
                 apply_mode=APPLY_MODE,
                 execute=EXECUTE_NEXT_CANDIDATES,
+                execute_mode=EXECUTE_MODE,
+                max_parallel_runs=MAX_PARALLEL_RUNS,
                 config_overrides=DOE_CONFIG_OVERRIDES,
             )
             print(f"  Prepared {len(next_planned_runs)} proposed-candidate run(s).")
@@ -324,6 +352,7 @@ def run_initial_doe():
                 manifest_path=NEXT_MANIFEST_CSV,
                 dataset_path=NEXT_DATASET_CSV,
                 objective_weights=OBJECTIVE_WEIGHTS,
+                experimental_targets=load_experimental_targets_if_enabled(),
                 statuses=PROCESS_STATUSES,
                 output_subdir=PROCESSED_OUTPUT_SUBDIR,
                 damage_object=DAMAGE_OBJECT,

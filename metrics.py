@@ -150,6 +150,80 @@ def centerline_bending_metric(point_csv, x_col="x", y_col="y", z_col="z", axis_c
     }
 
 
+
+def normalize_experimental_targets(targets):
+    """Normalize experimental target definitions for metric-fit objectives.
+
+    Accepted forms:
+    - {"grain_mean_um": 24.0}
+    - {"grain_mean_um": {"target": 24.0, "weight": 2.0, "tolerance": 1.5}}
+
+    The returned dictionary maps metric names to numeric target, weight, and
+    optional tolerance values. Tolerance scales the normalized error when supplied.
+    """
+    normalized = {}
+    for metric_name, spec in (targets or {}).items():
+        if isinstance(spec, dict):
+            target = spec.get("target", spec.get("value"))
+            weight = float(spec.get("weight", 1.0))
+            tolerance = spec.get("tolerance", spec.get("sigma"))
+        else:
+            target = spec
+            weight = 1.0
+            tolerance = None
+        if target is None or pd.isna(target):
+            continue
+        normalized[str(metric_name)] = {
+            "target": float(target),
+            "weight": weight,
+            "tolerance": None if tolerance in (None, "") or pd.isna(tolerance) else float(tolerance),
+        }
+    return normalized
+
+
+def experimental_fit_metrics(metrics, experimental_targets):
+    """Compute simulation-vs-experiment error metrics.
+
+    For every target whose metric exists, this adds:
+    - expfit_<metric>_error
+    - expfit_<metric>_abs_error
+    - expfit_<metric>_sq_error
+    - expfit_<metric>_normalized_abs_error
+
+    It also adds expfit_total_abs_error and expfit_total_sq_error, weighted by the
+    target definitions. Lower values mean better agreement with experiment.
+    """
+    targets = normalize_experimental_targets(experimental_targets)
+    fit = {}
+    total_abs = 0.0
+    total_sq = 0.0
+    used = 0
+
+    for metric_name, spec in targets.items():
+        value = metrics.get(metric_name)
+        if value is None or pd.isna(value):
+            continue
+        error = float(value) - float(spec["target"])
+        abs_error = abs(error)
+        sq_error = error * error
+        tolerance = spec.get("tolerance")
+        normalized_abs_error = abs_error / tolerance if tolerance and tolerance > 0 else abs_error
+        safe_name = metric_name.replace(" ", "_").replace("/", "_")
+        fit[f"expfit_{safe_name}_target"] = float(spec["target"])
+        fit[f"expfit_{safe_name}_error"] = error
+        fit[f"expfit_{safe_name}_abs_error"] = abs_error
+        fit[f"expfit_{safe_name}_sq_error"] = sq_error
+        fit[f"expfit_{safe_name}_normalized_abs_error"] = normalized_abs_error
+        total_abs += float(spec["weight"]) * normalized_abs_error
+        total_sq += float(spec["weight"]) * sq_error
+        used += 1
+
+    if used:
+        fit["expfit_num_targets_used"] = used
+        fit["expfit_total_abs_error"] = total_abs
+        fit["expfit_total_sq_error"] = total_sq
+    return fit
+
 def weighted_objective(metrics, weights, minimize=True):
     """Combine metrics into one scalar objective.
 

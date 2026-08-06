@@ -43,6 +43,8 @@ SHORT_MATERIAL_OPTIONS = ["316L", "4140", "4340", "15-5", "IN625"]
 MATERIAL_SOURCE_OPTIONS = ["system_library", "user_library", "key", "db", "assign"]
 DIE_MOTION_OPTIONS = ["", "single_top_die", "symmetric"]
 DIE_AXIS_OPTIONS = ["z", "y"]
+LOCAL_TEMP_STAGE_OPTIONS = ["each_hit", "hit0", "both"]
+LOCAL_TEMP_AXIS_OPTIONS = ["x", "y", "z"]
 MESH_OPTIONS = ["coarse", "fine"]
 BOOLEAN_OPTIONS = ["true", "false"]
 DOE_FLAG_KEYS = [
@@ -248,6 +250,8 @@ class ConfigField:
             return to_bool_text(value)
         if value is None:
             return "None"
+        if isinstance(value, (list, dict)):
+            return json.dumps(value)
         return str(value)
 
     def browse_path(self, browse):
@@ -450,11 +454,12 @@ class DeformConfigGui(tk.Tk):
 
         self.tabs = {}
         self.nav_buttons = {}
-        tab_names = ["Paths", "Run Setup", "Material/JMAK", "Outputs", "Columns", "Action Files", "DOE", "Post/Reports", "Run"]
+        tab_names = ["Paths", "Run Setup", "Action Files", "Material/JMAK", "Temperature", "Outputs", "Columns", "DOE", "Post/Reports", "Run"]
         nav_labels = {
             "Paths": "Setup",
             "Run Setup": "Run setup",
             "Material/JMAK": "Materials",
+            "Temperature": "Temperature",
             "Outputs": "Outputs",
             "Columns": "Columns",
             "Action Files": "Action files",
@@ -484,10 +489,11 @@ class DeformConfigGui(tk.Tk):
 
         self.build_paths_tab()
         self.build_run_setup_tab()
+        self.build_action_files_tab()
         self.build_material_tab()
+        self.build_temperature_tab()
         self.build_outputs_tab()
         self.build_columns_tab()
-        self.build_action_files_tab()
         self.build_doe_tab()
         self.build_post_reports_tab()
         self.build_launch_tab()
@@ -676,6 +682,48 @@ class DeformConfigGui(tk.Tk):
         if suggested_label:
             self.fields["material"].set_value(suggested_label)
 
+    def build_temperature_tab(self):
+        """Build controls for optional local node-temperature initialization."""
+        ttk.Label(
+            self.tabs["Temperature"],
+            text="Optional node-level temperature overrides for the workpiece.",
+            style="Muted.TLabel",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", padx=12, pady=(10, 12))
+
+        self.add_field("Temperature", "Enable local temperature", "enable_local_temperature", 1, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_field("Temperature", "Apply stage", "local_temperature_apply_stage", 2, kind="combo", options=LOCAL_TEMP_STAGE_OPTIONS)
+        self.add_field("Temperature", "Workpiece object number", "local_temperature_object_number", 3)
+        self.add_field("Temperature", "Default Baseline Temperature [F]", "local_temperature_default_temp_f", 4)
+
+        ttk.Label(self.tabs["Temperature"], text="Constant low-coordinate side", style="Section.TLabel").grid(
+            row=5, column=0, columnspan=3, sticky="w", padx=12, pady=(18, 6)
+        )
+        self.add_field("Temperature", "Enable left-side region", "local_temperature_left_enabled", 6, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_field("Temperature", "Left-side axis", "local_temperature_left_axis", 7, kind="combo", options=LOCAL_TEMP_AXIS_OPTIONS)
+        self.add_field("Temperature", "Left-side fraction", "local_temperature_left_fraction", 8)
+        self.add_field("Temperature", "Left-side Temperature [F]", "local_temperature_left_temp_f", 9)
+
+        ttk.Label(self.tabs["Temperature"], text="Center-to-surface gradient", style="Section.TLabel").grid(
+            row=10, column=0, columnspan=3, sticky="w", padx=12, pady=(18, 6)
+        )
+        self.add_field("Temperature", "Enable radial gradient", "local_temperature_enable_radial_gradient", 11, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_field("Temperature", "Gradient axial axis", "local_temperature_gradient_axis", 12, kind="combo", options=LOCAL_TEMP_AXIS_OPTIONS)
+        self.add_field("Temperature", "Gradient lower fraction", "local_temperature_gradient_lower_fraction", 13)
+        self.add_field("Temperature", "Gradient upper fraction", "local_temperature_gradient_upper_fraction", 14)
+        self.add_field("Temperature", "Gradient center Temperature [F]", "local_temperature_gradient_center_temp_f", 15)
+        self.add_field("Temperature", "Gradient surface Temperature [F]", "local_temperature_gradient_surface_temp_f", 16)
+        self.add_field("Temperature", "Gradient exponent", "local_temperature_gradient_exponent", 17)
+
+        ttk.Label(self.tabs["Temperature"], text="Advanced JSON specifications", style="Section.TLabel").grid(
+            row=18, column=0, columnspan=3, sticky="w", padx=12, pady=(18, 6)
+        )
+        self.add_field("Temperature", "Axis bands JSON", "local_temperature_axis_bands", 19)
+        self.add_field("Temperature", "Radial gradients JSON", "local_temperature_radial_gradients", 20)
+        ttk.Label(
+            self.tabs["Temperature"],
+            text="Fractions run from 0 to 1 along the selected axis. Advanced JSON fields must be lists.",
+            style="Muted.TLabel",
+        ).grid(row=21, column=0, columnspan=3, sticky="w", padx=12, pady=(8, 12))
     def build_outputs_tab(self):
         self.add_field("Outputs", "Export post-hit keys", "export_post_hit_keys", 0, kind="combo_bool", options=BOOLEAN_OPTIONS)
         self.add_field("Outputs", "Export coordinate logs", "export_coordinate_logs", 1, kind="combo_bool", options=BOOLEAN_OPTIONS)
@@ -874,30 +922,39 @@ class DeformConfigGui(tk.Tk):
         self.add_doe_field("Initial candidates", "N_CANDIDATES", 100, 18)
         self.add_doe_field("Random seed", "RANDOM_SEED", 1, 19)
         self.add_doe_field("Apply mode", "APPLY_MODE", "all_rows", 20, kind="combo", options=["all_rows", "hit_row"])
-        self.add_doe_field("Model type", "MODEL_TYPE", "random_forest", 21, kind="combo", options=["random_forest", "gaussian_process"])
-        self.add_doe_field("Next candidates", "N_NEXT_CANDIDATES", 5, 22)
-        self.add_doe_field("Random Bayesian candidates", "N_RANDOM_BAYESIAN_CANDIDATES", 2000, 23)
-        self.add_doe_field("Next round number", "NEXT_ROUND_NUMBER", 2, 24)
-        self.add_doe_field("Max round number", "MAX_ROUND_NUMBER", 2, 25)
-        self.add_doe_field("Bounds JSON", "BOUNDS", '{"depth_in": [0.01, 0.15], "forging_temp_c": [900, 1200]}', 26)
-        self.add_doe_field("Objective weights JSON", "OBJECTIVE_WEIGHTS", '{"damage_max": 10.0, "grain_std_um": 10.0, "top_die_center_distance": 10.0, "bottom_die_center_distance": 10.0}', 27)
+        self.add_doe_field("Execute mode", "EXECUTE_MODE", "direct", 21, kind="combo", options=["direct", "subprocess"])
+        self.add_doe_field("Max parallel runs", "MAX_PARALLEL_RUNS", 1, 22)
+        self.add_doe_field("Model type", "MODEL_TYPE", "random_forest", 23, kind="combo", options=["random_forest", "gaussian_process"])
+        self.add_doe_field("Next candidates", "N_NEXT_CANDIDATES", 5, 24)
+        self.add_doe_field("Random Bayesian candidates", "N_RANDOM_BAYESIAN_CANDIDATES", 2000, 25)
+        self.add_doe_field("Next round number", "NEXT_ROUND_NUMBER", 2, 26)
+        self.add_doe_field("Max round number", "MAX_ROUND_NUMBER", 2, 27)
+        self.add_doe_field("Bounds JSON", "BOUNDS", '{"depth_in": [0.01, 0.15], "forging_temp_c": [900, 1200]}', 28)
+        self.add_doe_field("Objective weights JSON", "OBJECTIVE_WEIGHTS", '{"damage_max": 10.0, "grain_std_um": 10.0, "top_die_center_distance": 10.0, "bottom_die_center_distance": 10.0}', 29)
+        self.add_doe_field("Fit experimental data", "FIT_EXPERIMENTAL_DATA", False, 30, kind="combo_bool", options=BOOLEAN_OPTIONS)
+        self.add_doe_field("Experimental targets file", "EXPERIMENTAL_TARGETS_PATH", "None", 31)
+        ttk.Button(
+            tab,
+            text="Browse",
+            command=lambda: self.browse_file_field("EXPERIMENTAL_TARGETS_PATH", [("Targets", "*.csv *.json"), ("All files", "*.*")]),
+        ).grid(row=31, column=2, padx=(6, 10), pady=6)
 
         self.apply_doe_protocol_stage()
 
         button_frame = ttk.Frame(tab, style="ButtonBar.TFrame")
-        button_frame.grid(row=28, column=1, sticky="ew", padx=6, pady=(10, 4))
+        button_frame.grid(row=33, column=1, sticky="ew", padx=6, pady=(10, 4))
         ttk.Button(button_frame, text="Save Current Run Config for DOE", command=self.save_json_config).pack(side="left", padx=(0, 6))
         ttk.Button(button_frame, text="Run DOE Stage", command=self.run_doe_workflow, style="Accent.TButton").pack(side="left", padx=6)
         ttk.Button(button_frame, text="Preview DOE Launcher", command=self.preview_doe_launcher).pack(side="left", padx=6)
 
-        ttk.Separator(tab, orient="horizontal").grid(row=29, column=0, columnspan=3, sticky="ew", pady=10)
-        ttk.Label(tab, text="Examine DOE files", style="Section.TLabel").grid(row=30, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 8))
+        ttk.Separator(tab, orient="horizontal").grid(row=34, column=0, columnspan=3, sticky="ew", pady=10)
+        ttk.Label(tab, text="Examine DOE files", style="Section.TLabel").grid(row=35, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 8))
         ttk.Label(
             tab,
             text="Refresh this list after each stage. Select a file or folder and open it to inspect generated candidates, configs, manifests, datasets, or reports.",
             style="Muted.TLabel",
             wraplength=900,
-        ).grid(row=31, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 8))
+        ).grid(row=36, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 8))
 
         self.doe_artifact_listbox = tk.Listbox(
             tab,
@@ -911,11 +968,11 @@ class DeformConfigGui(tk.Tk):
             highlightbackground=COLOR_BORDER,
             font=(FONT_FAMILY, 10),
         )
-        self.doe_artifact_listbox.grid(row=32, column=0, columnspan=3, sticky="nsew", padx=8, pady=(0, 8))
-        tab.rowconfigure(32, weight=1)
+        self.doe_artifact_listbox.grid(row=37, column=0, columnspan=3, sticky="nsew", padx=8, pady=(0, 8))
+        tab.rowconfigure(37, weight=1)
 
         file_button_frame = ttk.Frame(tab, style="ButtonBar.TFrame")
-        file_button_frame.grid(row=33, column=1, sticky="w", padx=6, pady=(0, 8))
+        file_button_frame.grid(row=38, column=1, sticky="w", padx=6, pady=(0, 8))
         ttk.Button(file_button_frame, text="Refresh DOE Files", command=self.refresh_doe_artifacts).pack(side="left", padx=(0, 6))
         ttk.Button(file_button_frame, text="Open Selected", command=self.open_selected_doe_artifact).pack(side="left", padx=6)
         ttk.Button(file_button_frame, text="Open Study Folder", command=lambda: self.open_path_if_exists(self.doe_study_dir())).pack(side="left", padx=6)
@@ -1124,6 +1181,20 @@ class DeformConfigGui(tk.Tk):
         config["columns"] = {key: field.get_value() for key, field in self.column_fields.items()}
         config["key_files"] = {key: field.get_value() for key, field in self.key_file_fields.items()}
         config["material_type"] = self.material_type_var.get()
+        for json_list_key in ["local_temperature_axis_bands", "local_temperature_radial_gradients"]:
+            value = config.get(json_list_key)
+            if isinstance(value, str):
+                text_value = value.strip()
+                if text_value == "" or text_value.lower() in {"none", "null"}:
+                    config[json_list_key] = []
+                else:
+                    try:
+                        parsed_value = json.loads(text_value)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(f"{json_list_key} must be valid JSON: {exc}") from exc
+                    if not isinstance(parsed_value, list):
+                        raise ValueError(f"{json_list_key} must be a JSON list.")
+                    config[json_list_key] = parsed_value
         set_simulation_modes_from_jmak(config)
         if "jmak_simulation_modes" in self.fields:
             self.fields["jmak_simulation_modes"].set_value(config["jmak_simulation_modes"])
@@ -1211,6 +1282,16 @@ class DeformConfigGui(tk.Tk):
         )
         if selected:
             variable.set(selected)
+
+    def browse_file_field(self, field_key, filetypes):
+        field = self.doe_fields.get(field_key)
+        initial_value = field.var.get() if field else ""
+        selected = filedialog.askopenfilename(
+            initialdir=str(Path(initial_value).parent) if initial_value and initial_value != "None" else str(APP_DIR),
+            filetypes=filetypes,
+        )
+        if selected and field:
+            field.set_value(selected)
 
     def start_command(self, command, label, on_complete=None):
         self.log(label)
@@ -1363,6 +1444,8 @@ class DeformConfigGui(tk.Tk):
             "COMBINE_DATASETS": self.doe_fields["COMBINE_DATASETS"].get_value(),
             "MAKE_REPORT": self.doe_fields["MAKE_REPORT"].get_value(),
             "APPLY_MODE": self.doe_fields["APPLY_MODE"].get_value(),
+            "EXECUTE_MODE": self.doe_fields["EXECUTE_MODE"].get_value(),
+            "MAX_PARALLEL_RUNS": int(self.doe_fields["MAX_PARALLEL_RUNS"].get_value()),
             "N_CANDIDATES": int(self.doe_fields["N_CANDIDATES"].get_value()),
             "RANDOM_SEED": int(self.doe_fields["RANDOM_SEED"].get_value()),
             "MODEL_TYPE": self.doe_fields["MODEL_TYPE"].get_value(),
@@ -1372,6 +1455,8 @@ class DeformConfigGui(tk.Tk):
             "MAX_ROUND_NUMBER": int(self.doe_fields["MAX_ROUND_NUMBER"].get_value()),
             "BOUNDS": self.parse_json_field("BOUNDS"),
             "OBJECTIVE_WEIGHTS": self.parse_json_field("OBJECTIVE_WEIGHTS"),
+            "FIT_EXPERIMENTAL_DATA": self.doe_fields["FIT_EXPERIMENTAL_DATA"].get_value(),
+            "EXPERIMENTAL_TARGETS_PATH": self.doe_fields["EXPERIMENTAL_TARGETS_PATH"].get_value(),
             "DOE_CONFIG_OVERRIDES": {
                 "num_hits": num_hits,
                 "die_motion_mode": self.fields["die_motion_mode"].get_value() or "single_top_die",

@@ -70,6 +70,54 @@ def parse_json_or_file(value, default=None):
     return json.loads(text)
 
 
+
+def load_experimental_targets(value):
+    """Load experimental metric targets from JSON or CSV.
+
+    JSON may be a mapping such as:
+        {"grain_mean_um": {"target": 24.0, "weight": 1.0, "tolerance": 2.0}}
+
+    CSV should include at least metric,target columns. Optional columns are
+    weight and tolerance.
+    """
+    if is_blank(value):
+        return None
+    if isinstance(value, dict):
+        return value
+
+    path = Path(str(value))
+    if path.exists() and path.suffix.lower() == ".csv":
+        df = pd.read_csv(path)
+        lower_columns = {column.lower(): column for column in df.columns}
+        if "metric" not in lower_columns or "target" not in lower_columns:
+            raise ValueError("Experimental target CSV must contain metric and target columns.")
+        result = {}
+        for _, row in df.iterrows():
+            metric = row[lower_columns["metric"]]
+            if is_blank(metric):
+                continue
+            spec = {"target": row[lower_columns["target"]]}
+            if "weight" in lower_columns and not is_blank(row[lower_columns["weight"]]):
+                spec["weight"] = row[lower_columns["weight"]]
+            if "tolerance" in lower_columns and not is_blank(row[lower_columns["tolerance"]]):
+                spec["tolerance"] = row[lower_columns["tolerance"]]
+            result[str(metric)] = spec
+        return result
+
+    targets = parse_json_or_file(value, default=None)
+    if targets is None or isinstance(targets, dict):
+        return targets
+    if isinstance(targets, list):
+        result = {}
+        for item in targets:
+            result[str(item["metric"])] = {
+                "target": item["target"],
+                "weight": item.get("weight", 1.0),
+                "tolerance": item.get("tolerance"),
+            }
+        return result
+    raise ValueError("Experimental targets must be a JSON mapping/list or a CSV file.")
+
 def ensure_columns(df, columns):
     """Ensure a DataFrame contains all requested columns."""
     for column in columns:
@@ -417,6 +465,7 @@ def process_doe_results(
     manifest_path,
     dataset_path=None,
     objective_weights=None,
+    experimental_targets=None,
     statuses=("completed",),
     output_subdir="processed",
     damage_object="Workpiece",
@@ -424,6 +473,7 @@ def process_doe_results(
 ):
     """Process DOE results, update manifest, and build a dataset."""
     manifest_path = Path(manifest_path)
+    experimental_targets = load_experimental_targets(experimental_targets)
     manifest = ensure_columns(load_manifest(manifest_path), RESULT_COLUMNS)
 
     status_set = {status.lower() for status in statuses}
@@ -453,6 +503,7 @@ def process_doe_results(
         manifest_path=manifest_path,
         output_csv_path=dataset_path,
         objective_weights=objective_weights,
+        experimental_targets=experimental_targets,
         statuses=statuses,
     )
 
@@ -461,6 +512,7 @@ def process_doe_results(
         "dataset_path": str(dataset_path),
         "processed_count": processed_count,
         "dataset_rows": int(len(dataset)),
+        "experimental_targets_used": bool(experimental_targets),
     }
 
 
@@ -529,6 +581,11 @@ def main():
         help="JSON string or JSON file mapping metric names to objective weights.",
     )
     parser.add_argument(
+        "--experimental-targets",
+        default=None,
+        help="JSON or CSV file containing experimental target metrics to fit.",
+    )
+    parser.add_argument(
         "--statuses",
         default="completed",
         help="Comma-separated manifest statuses to process. Use empty string to process all rows.",
@@ -547,11 +604,13 @@ def main():
 
     statuses = tuple(status.strip() for status in args.statuses.split(",") if status.strip())
     objective_weights = parse_json_or_file(args.objective_weights, default=None)
+    experimental_targets = load_experimental_targets(args.experimental_targets)
 
     result = process_doe_results(
         manifest_path=args.manifest,
         dataset_path=args.dataset,
         objective_weights=objective_weights,
+        experimental_targets=experimental_targets,
         statuses=statuses,
         output_subdir=args.output_subdir,
         damage_object=args.damage_object,

@@ -137,7 +137,14 @@ EXECUTE_RUNS = True
 PROCESS_RESULTS = False
 ```
 
-This launches the prepared DEFORM runs.
+This launches the prepared DEFORM runs. By default the launcher runs candidates one at a time. To run multiple candidate configs concurrently, set:
+
+```python
+EXECUTE_MODE = "subprocess"
+MAX_PARALLEL_RUNS = 2
+```
+
+Use a small value first. Each active candidate can consume a DEFORM license, CPU cores, memory, and disk bandwidth. If `MAX_PARALLEL_RUNS > 1`, the DOE runner uses subprocess execution even when `EXECUTE_MODE` is left as `"direct"`. Per-candidate logs are written beside the generated config files as `<run_name>_deform_run.log`.
 
 ### Pass 3: Process Initial DOE and Propose Next Candidates
 
@@ -250,6 +257,38 @@ surrogate reports and writes a reporting folder with:
 ```python
 MAKE_REPORT = True
 ```
+
+
+## Fitting Experimental Data
+
+DOE processing can add simulation-vs-experiment fit metrics to `dataset.csv`. Set these in `run_initial_doe.py` or the GUI DOE tab:
+
+```python
+FIT_EXPERIMENTAL_DATA = True
+EXPERIMENTAL_TARGETS_PATH = r"C:\path\to\experimental_targets.csv"
+OBJECTIVE_WEIGHTS = {
+    "expfit_total_abs_error": 1.0
+}
+```
+
+The target file can be CSV:
+
+```csv
+metric,target,weight,tolerance
+grain_mean_um,24.0,1.0,2.0
+damage_max,0.15,0.5,
+```
+
+or JSON:
+
+```json
+{
+  "grain_mean_um": {"target": 24.0, "weight": 1.0, "tolerance": 2.0},
+  "damage_max": {"target": 0.15, "weight": 0.5}
+}
+```
+
+The `metric` names must match columns produced in `dataset.csv`, such as `grain_mean_um`, `grain_std_um`, `damage_max`, or load-stroke summary columns. Lower `expfit_total_abs_error` means the simulation better matches the experimental targets.
 
 ## Manual Processing
 

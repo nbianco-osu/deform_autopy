@@ -18,6 +18,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 import pandas as pd
 from run_manifest import append_manifest_record, update_manifest_status
@@ -196,10 +197,140 @@ def prepare_candidate_run(
     }
 
 
+def build_runner_command(runner_script, config_path):
+    """Return the command used to launch one generated DEFORM config."""
+    return [sys.executable, str(runner_script), "--config", str(config_path)]
+
+
 def run_deform_config(runner_script, config_path, cwd=None):
     """Execute the DEFORM runner for one generated config in a subprocess."""
-    command = [sys.executable, str(runner_script), "--config", str(config_path)]
-    return subprocess.run(command, cwd=cwd, check=False)
+    return subprocess.run(build_runner_command(runner_script, config_path), cwd=cwd, check=False)
+
+
+def run_log_path(planned):
+    """Return the per-candidate stdout/stderr log path for subprocess execution."""
+    config_path = Path(planned["config_path"])
+    return config_path.with_name(f"{planned['run_name']}_deform_run.log")
+
+
+def start_deform_config_subprocess(runner_script, planned, cwd=None):
+    """Start one DEFORM runner subprocess and stream output to a run log."""
+    log_path = run_log_path(planned)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file = open(log_path, "w", encoding="utf-8", errors="replace")
+    process = subprocess.Popen(
+        build_runner_command(runner_script, planned["config_path"]),
+        cwd=cwd,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    return process, log_file, log_path
+
+
+def mark_run_complete(manifest_path, record_id, return_code, log_path=None):
+    """Update manifest status after one candidate process finishes."""
+    log_note = f" Log: {log_path}" if log_path else ""
+    if return_code == 0:
+        update_manifest_status(manifest_path, record_id, "completed", notes=f"Runner completed successfully.{log_note}")
+    else:
+        update_manifest_status(
+            manifest_path,
+            record_id,
+            "failed",
+            notes=f"Runner exited with code {return_code}.{log_note}",
+        )
+
+
+def execute_planned_runs_sequential(planned_runs, manifest_path, runner_script, execute_mode="direct"):
+    """Execute prepared DOE runs one at a time."""
+    runner_main = load_runner_main(runner_script) if execute_mode == "direct" else None
+    for planned in planned_runs:
+        record_id = planned["manifest_record_id"]
+        update_manifest_status(manifest_path, record_id, "running")
+        if execute_mode == "direct":
+            return_code = run_deform_config_direct(runner_main, planned["config_path"])
+            mark_run_complete(manifest_path, record_id, return_code)
+        else:
+            result = run_deform_config(
+                runner_script=runner_script,
+                config_path=planned["config_path"],
+                cwd=runner_script.parent,
+            )
+            mark_run_complete(manifest_path, record_id, result.returncode)
+
+
+def execute_planned_runs_parallel(planned_runs, manifest_path, runner_script, max_parallel_runs=2, poll_seconds=5):
+    """Execute prepared DOE runs using a bounded subprocess queue.
+
+    Parallel execution intentionally uses subprocesses. The direct Spyder path
+    imports DEFORM modules into the current Python process and is not safe to run
+    concurrently because `defModel` and `defRun` are process-global API objects.
+    """
+    max_parallel_runs = max(1, int(max_parallel_runs))
+    pending = list(planned_runs)
+    running = []
+    print(f"Launching DOE subprocess queue with max_parallel_runs={max_parallel_runs}.")
+
+    try:
+        while pending or running:
+            while pending and len(running) < max_parallel_runs:
+                planned = pending.pop(0)
+                record_id = planned["manifest_record_id"]
+                process, log_file, log_path = start_deform_config_subprocess(
+                    runner_script=runner_script,
+                    planned=planned,
+                    cwd=runner_script.parent,
+                )
+                update_manifest_status(
+                    manifest_path,
+                    record_id,
+                    "running",
+                    notes=f"Parallel subprocess PID {process.pid}. Log: {log_path}",
+                )
+                running.append(
+                    {
+                        "planned": planned,
+                        "record_id": record_id,
+                        "process": process,
+                        "log_file": log_file,
+                        "log_path": log_path,
+                    }
+                )
+                print(f"  Started {planned['run_name']} as PID {process.pid}. Log: {log_path}")
+
+            still_running = []
+            for active in running:
+                return_code = active["process"].poll()
+                if return_code is None:
+                    still_running.append(active)
+                    continue
+
+                active["log_file"].close()
+                mark_run_complete(
+                    manifest_path,
+                    active["record_id"],
+                    return_code,
+                    log_path=active["log_path"],
+                )
+                print(f"  Finished {active['planned']['run_name']} with code {return_code}.")
+
+            running = still_running
+            if pending or running:
+                time.sleep(float(poll_seconds))
+
+    except KeyboardInterrupt:
+        print("Interrupted. Terminating active DOE subprocesses...")
+        for active in running:
+            active["process"].terminate()
+            active["log_file"].close()
+            update_manifest_status(
+                manifest_path,
+                active["record_id"],
+                "failed",
+                notes=f"Terminated after keyboard interrupt. Log: {active['log_path']}",
+            )
+        raise
 
 
 def load_runner_main(runner_script):
@@ -237,6 +368,7 @@ def orchestrate_doe_runs(
     apply_mode="all_rows",
     execute=False,
     execute_mode="direct",
+    max_parallel_runs=1,
     config_overrides=None,
 ):
     """Prepare and optionally execute all candidates in a DOE CSV."""
@@ -247,8 +379,10 @@ def orchestrate_doe_runs(
     runner_script = Path(runner_script).resolve()
     if execute_mode not in ("direct", "subprocess"):
         raise ValueError("execute_mode must be 'direct' or 'subprocess'.")
-
-    runner_main = load_runner_main(runner_script) if execute and execute_mode == "direct" else None
+    max_parallel_runs = max(1, int(max_parallel_runs))
+    if execute and max_parallel_runs > 1 and execute_mode == "direct":
+        print("Parallel DOE execution requires subprocess mode; switching execute_mode to 'subprocess'.")
+        execute_mode = "subprocess"
 
     planned_runs = []
     for idx, candidate_row in candidates.iterrows():
@@ -285,27 +419,22 @@ def orchestrate_doe_runs(
         planned["manifest_record_id"] = record["record_id"]
         planned_runs.append(planned)
 
-        if execute:
-            update_manifest_status(manifest_path, record["record_id"], "running")
-            if execute_mode == "direct":
-                return_code = run_deform_config_direct(runner_main, planned["config_path"])
-            else:
-                result = run_deform_config(
-                    runner_script=runner_script,
-                    config_path=planned["config_path"],
-                    cwd=runner_script.parent,
-                )
-                return_code = result.returncode
 
-            if return_code == 0:
-                update_manifest_status(manifest_path, record["record_id"], "completed")
-            else:
-                update_manifest_status(
-                    manifest_path,
-                    record["record_id"],
-                    "failed",
-                    notes=f"Runner exited with code {return_code}",
-                )
+    if execute:
+        if max_parallel_runs > 1:
+            execute_planned_runs_parallel(
+                planned_runs,
+                manifest_path=manifest_path,
+                runner_script=runner_script,
+                max_parallel_runs=max_parallel_runs,
+            )
+        else:
+            execute_planned_runs_sequential(
+                planned_runs,
+                manifest_path=manifest_path,
+                runner_script=runner_script,
+                execute_mode=execute_mode,
+            )
 
     return planned_runs
 
@@ -320,6 +449,7 @@ def run_doe_loop_from_config(
     apply_mode="all_rows",
     execute=True,
     execute_mode="direct",
+    max_parallel_runs=1,
     num_hits=None,
     die_motion_mode=None,
 ):
@@ -341,6 +471,7 @@ def run_doe_loop_from_config(
         apply_mode=apply_mode,
         execute=execute,
         execute_mode=execute_mode,
+        max_parallel_runs=max_parallel_runs,
         config_overrides=overrides,
     )
 
@@ -372,7 +503,13 @@ def main():
         "--execute-mode",
         choices=["direct", "subprocess"],
         default="direct",
-        help="Use direct main(config_path) execution or a subprocess.",
+        help="Use direct main(config_path) execution or a subprocess. Parallel runs use subprocess mode.",
+    )
+    parser.add_argument(
+        "--max-parallel-runs",
+        type=int,
+        default=1,
+        help="Maximum number of candidate configs to run at once. Values >1 use subprocess execution.",
     )
     parser.add_argument("--num-hits", type=int, default=None, help="Override num_hits in generated configs.")
     parser.add_argument(
@@ -401,6 +538,7 @@ def main():
         apply_mode=args.apply_mode,
         execute=args.execute,
         execute_mode=args.execute_mode,
+        max_parallel_runs=args.max_parallel_runs,
         config_overrides=config_overrides,
     )
     print(f"Prepared {len(planned_runs)} DOE run(s).")

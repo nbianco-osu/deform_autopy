@@ -8,7 +8,7 @@ and measured outputs/objectives in the same table.
 import json
 from pathlib import Path
 import pandas as pd
-from metrics import collect_metrics_from_files, weighted_objective
+from metrics import collect_metrics_from_files, experimental_fit_metrics, weighted_objective
 from run_manifest import load_manifest
 
 
@@ -61,6 +61,7 @@ def build_dataset_from_manifest(
     output_csv_path,
     metric_file_columns=None,
     objective_weights=None,
+    experimental_targets=None,
     statuses=("completed",),
 ):
     """Build a dataset from manifest rows plus optional metric files.
@@ -109,6 +110,8 @@ def build_dataset_from_manifest(
                 metric_inputs[metric_key] = path_value
 
         metrics = collect_metrics_from_files(**metric_inputs)
+        if experimental_targets:
+            metrics.update(experimental_fit_metrics(metrics, experimental_targets))
         row.update(metrics)
 
         if objective_weights:
