@@ -49,6 +49,22 @@ research loop.
   - Implements a first data-consistent inversion update using density ratios:
     observed output density divided by predicted prior output density.
 
+- `experimental_analysis/microstructure_import.py`
+  - Imports measured grain size, hardness, porosity, damage observations, and
+    tensile-property CSVs.
+  - Normalizes common column names while preserving source columns.
+
+- `experimental_analysis/validation.py`
+  - Flags questionable AF hits and stress-strain curves before they enter
+    calibration or model training.
+
+- `experimental_analysis/calibration.py`
+  - Runs transparent grid-search calibration over simple force, temperature,
+    grain, and damage correction parameters.
+
+- `experimental_analysis/reporting.py`
+  - Builds an HTML report and PNG plots without requiring matplotlib.
+
 - `experimental_analysis/fusion.py`
   - Provides conservative fusion strategies: hit-level joining, nearest spatial
     joining, and target-error joining.
@@ -116,8 +132,11 @@ result = run_experimental_analysis(
     output_dir=r"C:\path\to\experimental_analysis_output",
     deform_dataset_csv=r"C:\path\to\optimization\study\dataset.csv",
     microstructure_targets_csv=r"C:\path\to\microstructure_targets.csv",
+    experimental_microstructure_path=r"C:\path\to\measured_microstructure.csv",
     stock_diameter_mm=15.875,
     contact_area_mode="flat_punch",
+    run_calibration=True,
+    make_report=True,
 )
 
 print(result)
@@ -135,6 +154,65 @@ Optional distribution targets can point to another CSV containing measured
 values. Distribution comparison is intentionally separated from scalar target
 errors so you can decide how to weight it later.
 
+## Experimental Microstructure CSV Format
+
+The importer accepts flexible column names. These are preferred:
+
+```csv
+run_name,hit,region,x_mm,y_mm,z_mm,grain_size_um,hardness_hv,porosity_fraction,damage_observed
+run_001,1,center,12.5,0.0,0.0,27.8,210,0.002,no_crack
+```
+
+Supported normalized fields include:
+
+- `grain_size_um`
+- `hardness_hv`
+- `porosity_fraction`
+- `damage_observed`
+- `yield_strength_mpa`
+- `ultimate_strength_mpa`
+- `elongation_percent`
+
+All original source columns are preserved with a `source_` prefix.
+
+## Calibration Workflow
+
+The first calibration workflow is a transparent grid search. It evaluates simple
+correction parameters and writes every candidate, objective term, and rank.
+
+Default parameters:
+
+- `force_scale`
+- `temperature_offset_c`
+- `grain_scale`
+- `damage_scale`
+
+Use this as a defensible first pass before adding Bayesian calibration or
+fitting full JMAK/friction/heat-transfer parameters.
+
+Command-line example:
+
+```powershell
+python experimental_analysis_pipeline.py `
+  --raw-af-data-dir "C:\path\to\AF Data\Hit Folder" `
+  --output-dir "C:\path\to\experimental_analysis_output" `
+  --deform-dataset-csv "C:\path\to\optimization\study\dataset.csv" `
+  --microstructure-targets-csv "C:\path\to\targets.csv" `
+  --experimental-microstructure-path "C:\path\to\measured_microstructure.csv" `
+  --run-calibration
+```
+
+## Real AF Data Validation
+
+The validation module writes:
+
+- `stress_strain_validation.csv`
+- `af_validation_summary.csv`
+
+Review rows marked `review` before using the hit in model training. Common
+flags include low force signal, nonpositive depth, out-of-range temperature,
+too few curve points, and low strain range.
+
 ## Outputs
 
 The wrapper writes:
@@ -142,9 +220,18 @@ The wrapper writes:
 - `af_hit_signal_summary.csv`
 - `stress_strain_curves/*_stress_strain.csv`
 - `recrystallization_summary.csv`
+- `stress_strain_validation.csv`
+- `af_validation_summary.csv`
 - `af_experimental_features.csv`
 - `af_uncertainty_summary.csv`
+- `experimental_microstructure_normalized.csv` when measured microstructure is
+  provided
+- `experimental_microstructure_summary.csv` when measured microstructure is
+  provided
 - `deform_target_error_dataset.csv` when DEFORM dataset and targets are given
+- `calibration_grid_search.csv` when calibration is enabled
+- `calibration_best_parameters.csv` when calibration is enabled
+- `report/index.html` when reporting is enabled
 - `experimental_analysis_config.json`
 - `experimental_analysis_summary.json`
 
@@ -155,4 +242,3 @@ The wrapper writes:
 - Add friction, heat-transfer, JMAK, and damage-parameter calibration.
 - Use GPR with uncertainty when sklearn or gpytorch is available.
 - Connect DCI outputs to next-hit recommendation or DOE candidate generation.
-
