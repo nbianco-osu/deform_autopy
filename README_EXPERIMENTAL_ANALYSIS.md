@@ -133,7 +133,6 @@ result = run_experimental_analysis(
     deform_dataset_csv=r"C:\path\to\optimization\study\dataset.csv",
     microstructure_targets_csv=r"C:\path\to\microstructure_targets.csv",
     experimental_microstructure_path=r"C:\path\to\measured_microstructure.csv",
-    stock_diameter_mm=15.875,
     contact_area_mode="flat_punch",
     run_calibration=True,
     make_report=True,
@@ -141,6 +140,15 @@ result = run_experimental_analysis(
 
 print(result)
 ```
+
+If `stock_diameter_mm` is omitted, the pipeline tries to infer the diameter from
+the AF data folder name. Examples:
+
+- `Box_1in` -> `25.4 mm`
+- `Box_0.625in` -> `15.875 mm`
+- `Box_5_8in` -> `15.875 mm`
+
+You can still pass `stock_diameter_mm=...` to override this.
 
 ## Target CSV Format
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -53,6 +54,32 @@ DEFAULT_UNCERTAINTY_COLUMNS = [
 ]
 
 
+def infer_stock_diameter_mm_from_path(path: str | Path, fallback_mm: float = 15.875) -> float:
+    """Infer stock diameter from a folder/file path.
+
+    Recognized examples include `Box_1in`, `0.625in`, `5_8in`, and `5-8in`.
+    If no diameter tag is found, the historical 5/8 inch fallback is used.
+    """
+    text = " ".join(Path(path).parts).lower()
+
+    fraction_match = re.search(r"(?<!\d)(\d+)[_-](\d+)\s*in(?:ch|ches)?\b", text)
+    if fraction_match:
+        numerator = float(fraction_match.group(1))
+        denominator = float(fraction_match.group(2))
+        if denominator != 0:
+            return numerator / denominator * 25.4
+
+    decimal_match = re.search(r"(?<!\d)(\d+(?:\.\d+)?)\s*in(?:ch|ches)?\b", text)
+    if decimal_match:
+        return float(decimal_match.group(1)) * 25.4
+
+    mm_match = re.search(r"(?<!\d)(\d+(?:\.\d+)?)\s*mm\b", text)
+    if mm_match:
+        return float(mm_match.group(1))
+
+    return float(fallback_mm)
+
+
 def run_experimental_analysis(
     raw_af_data_dir: str | Path,
     output_dir: str | Path,
@@ -61,7 +88,7 @@ def run_experimental_analysis(
     experimental_microstructure_path: str | Path | None = None,
     calibration_targets_csv: str | Path | None = None,
     hit_glob: str = "*.csv",
-    stock_diameter_mm: float = 15.875,
+    stock_diameter_mm: float | None = None,
     initial_height_mm: float | None = None,
     contact_area_mode: str = "flat_punch",
     flat_punch_diameter_mm: float | None = None,
@@ -69,11 +96,14 @@ def run_experimental_analysis(
     make_report: bool = True,
 ) -> dict[str, str]:
     """Run AF experimental processing and optional DEFORM/target fusion."""
+    raw_af_data_dir = Path(raw_af_data_dir)
+    inferred_stock_diameter_mm = infer_stock_diameter_mm_from_path(raw_af_data_dir)
+    stock_diameter_mm = float(stock_diameter_mm) if stock_diameter_mm is not None else inferred_stock_diameter_mm
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     config = PipelineConfig(
-        raw_af_data_dir=Path(raw_af_data_dir),
+        raw_af_data_dir=raw_af_data_dir,
         output_dir=output_dir,
         deform_dataset_csv=Path(deform_dataset_csv) if deform_dataset_csv else None,
         microstructure_targets_csv=Path(microstructure_targets_csv) if microstructure_targets_csv else None,
@@ -135,6 +165,8 @@ def run_experimental_analysis(
         "af_experimental_features": str(combined_csv),
         "af_uncertainty_summary": str(uncertainty_csv),
         "curve_count": str(len(curve_paths)),
+        "stock_diameter_mm": f"{stock_diameter_mm:.6g}",
+        "stock_diameter_in": f"{stock_diameter_mm / 25.4:.6g}",
     }
 
     if experimental_microstructure_path:
@@ -191,7 +223,12 @@ def main() -> None:
     parser.add_argument("--experimental-microstructure-path", default=None, help="Optional measured microstructure CSV or folder.")
     parser.add_argument("--calibration-targets-csv", default=None, help="Optional calibration target CSV.")
     parser.add_argument("--hit-glob", default="*.csv", help="Glob pattern for AF hit files.")
-    parser.add_argument("--stock-diameter-mm", type=float, default=15.875)
+    parser.add_argument(
+        "--stock-diameter-mm",
+        type=float,
+        default=None,
+        help="Optional stock diameter override. If omitted, inferred from the raw data folder name, then falls back to 15.875 mm.",
+    )
     parser.add_argument("--initial-height-mm", type=float, default=None)
     parser.add_argument("--contact-area-mode", default="flat_punch", choices=["flat_punch", "growing_flat"])
     parser.add_argument("--flat-punch-diameter-mm", type=float, default=None)
