@@ -22,7 +22,7 @@ from .schema import AFColumnMap, ContactDetectionConfig, StressStrainConfig
 
 
 COMMON_COLUMN_ALIASES = {
-    "Time (s)": ["Time (s)", "Time", "time", "t", "Seconds"],
+    "Time (s)": ["Time (s)", "Time", "time", "t", "Seconds", "Time Unix (ms)", "Unix Time (ms)"],
     "Position (mm)": ["Position (mm)", "Position", "position", "Ram Position (mm)"],
     "Force (kN)": ["Force (kN)", "Force", "force", "Load (kN)", "Load"],
     "Thermal Cam Temp (c)": [
@@ -70,6 +70,11 @@ def read_af_hit_csv(csv_path: str | Path, column_map: AFColumnMap | None = None)
             for name, source in columns.items()
         }
     ).dropna(subset=["time_s", "position_mm", "force_kn"])
+    time_source = str(columns["time_s"]).lower()
+    if "ms" in time_source or "unix" in time_source:
+        normalized["time_s"] = normalized["time_s"] / 1000.0
+    if not normalized.empty:
+        normalized["time_s"] = normalized["time_s"] - float(normalized["time_s"].iloc[0])
     normalized = normalized.sort_values("time_s").reset_index(drop=True)
     normalized["source_file"] = csv_path.name
     normalized["hit"] = infer_hit_number(csv_path.name)
@@ -213,7 +218,12 @@ def process_af_folder(
     curve_dir = output_dir / "stress_strain_curves"
     summaries = []
     curve_paths = []
-    for csv_path in sorted(raw_dir.glob(hit_glob), key=lambda path: (infer_hit_number(path.name) or 10**9, path.name)):
+
+    def hit_sort_key(path: Path):
+        hit_number = infer_hit_number(path.name)
+        return (hit_number if hit_number is not None else 10**9, path.name)
+
+    for csv_path in sorted(raw_dir.glob(hit_glob), key=hit_sort_key):
         curve, summary = process_af_hit_file(
             csv_path,
             output_dir=curve_dir,
@@ -228,4 +238,3 @@ def process_af_folder(
     if not summary_df.empty:
         summary_df.to_csv(output_dir / "af_hit_signal_summary.csv", index=False)
     return summary_df, curve_paths
-

@@ -24,6 +24,18 @@ COLOR_BLUE = (45, 105, 178)
 COLOR_GREEN = (42, 150, 105)
 COLOR_ORANGE = (214, 125, 45)
 COLOR_RED = (184, 65, 65)
+COLOR_PURPLE = (126, 87, 194)
+COLOR_GRAY = (107, 114, 128)
+PLOT_COLORS = [
+    COLOR_BLUE,
+    COLOR_GREEN,
+    COLOR_ORANGE,
+    COLOR_PURPLE,
+    COLOR_RED,
+    (20, 132, 143),
+    (91, 141, 65),
+    (148, 92, 54),
+]
 
 
 def load_font(size: int) -> ImageFont.ImageFont:
@@ -67,6 +79,17 @@ def scale_xy(x, y, x_bounds, y_bounds) -> tuple[int, int]:
     return int(round(xp)), int(round(yp))
 
 
+def format_tick(value: float) -> str:
+    """Format numeric tick labels compactly."""
+    if abs(value) >= 100:
+        return f"{value:.0f}"
+    if abs(value) >= 10:
+        return f"{value:.1f}"
+    if abs(value) >= 1:
+        return f"{value:.2f}"
+    return f"{value:.3f}"
+
+
 def canvas(title: str, x_label: str, y_label: str) -> tuple[Image.Image, ImageDraw.ImageDraw]:
     """Create a chart canvas."""
     image = Image.new("RGB", (PLOT_WIDTH, PLOT_HEIGHT), "white")
@@ -88,6 +111,26 @@ def canvas(title: str, x_label: str, y_label: str) -> tuple[Image.Image, ImageDr
     return image, draw
 
 
+def draw_numeric_ticks(
+    draw: ImageDraw.ImageDraw,
+    x_bounds: tuple[float, float],
+    y_bounds: tuple[float, float],
+    tick_count: int = 6,
+) -> None:
+    """Draw numeric x/y tick labels on an existing canvas."""
+    tick_font = load_font(15)
+    left, right = MARGIN, PLOT_WIDTH - MARGIN
+    top, bottom = MARGIN, PLOT_HEIGHT - MARGIN
+    for step in range(tick_count):
+        fraction = step / max(tick_count - 1, 1)
+        x_value = x_bounds[0] + fraction * (x_bounds[1] - x_bounds[0])
+        y_value = y_bounds[0] + fraction * (y_bounds[1] - y_bounds[0])
+        x_pixel = int(left + fraction * (right - left))
+        y_pixel = int(bottom - fraction * (bottom - top))
+        draw.text((x_pixel - 22, bottom + 10), format_tick(x_value), fill=COLOR_GRAY, font=tick_font)
+        draw.text((left - 72, y_pixel - 9), format_tick(y_value), fill=COLOR_GRAY, font=tick_font)
+
+
 def save_line_plot(df: pd.DataFrame, x_col: str, y_col: str, output_path: Path, title: str, color=COLOR_BLUE) -> Path | None:
     """Save a line plot for two numeric columns."""
     if df.empty or x_col not in df.columns or y_col not in df.columns:
@@ -100,6 +143,7 @@ def save_line_plot(df: pd.DataFrame, x_col: str, y_col: str, output_path: Path, 
     x, y = x[valid], y[valid]
     x_bounds, y_bounds = bounds(x), bounds(y)
     image, draw = canvas(title, x_col, y_col)
+    draw_numeric_ticks(draw, x_bounds, y_bounds)
     points = [scale_xy(xi, yi, x_bounds, y_bounds) for xi, yi in zip(x, y)]
     draw.line(points, fill=color, width=4)
     for xp, yp in points:
@@ -115,6 +159,7 @@ def save_bar_plot(labels: list[str], values: list[float], output_path: Path, tit
     image, draw = canvas(title, "category", "count")
     label_font = load_font(16)
     y_bounds = bounds([0.0] + values)
+    draw_numeric_ticks(draw, (0, max(1, len(labels) - 1)), y_bounds)
     left, bottom = MARGIN, PLOT_HEIGHT - MARGIN
     bar_width = max(35, min(120, int((PLOT_WIDTH - 2 * MARGIN) / max(len(labels) * 1.5, 1))))
     gap = max(20, int(bar_width * 0.55))
@@ -126,6 +171,218 @@ def save_bar_plot(labels: list[str], values: list[float], output_path: Path, tit
         draw.text((x0 + 8, y0 - 28), f"{value:g}", fill=COLOR_TEXT, font=label_font)
     image.save(output_path)
     return output_path
+
+
+def save_stress_strain_overlay(
+    curve_dir: str | Path,
+    output_path: Path,
+    max_curves: int = 38,
+) -> Path | None:
+    """Save an overlay plot of effective stress-strain curves."""
+    curve_dir = Path(curve_dir)
+    curve_paths = sorted(curve_dir.glob("*_stress_strain.csv"))
+    if not curve_paths:
+        return None
+
+    curves = []
+    for path in curve_paths[:max_curves]:
+        df = pd.read_csv(path)
+        if "true_strain" not in df.columns or "effective_stress_mpa" not in df.columns:
+            continue
+        x = pd.to_numeric(df["true_strain"], errors="coerce").to_numpy(dtype=float)
+        y = pd.to_numeric(df["effective_stress_mpa"], errors="coerce").to_numpy(dtype=float)
+        valid = np.isfinite(x) & np.isfinite(y)
+        if valid.sum() < 2:
+            continue
+        hit_label = str(df["hit"].iloc[0]) if "hit" in df.columns and not df.empty else path.stem
+        curves.append((hit_label, x[valid], y[valid]))
+
+    if not curves:
+        return None
+
+    all_x = np.concatenate([curve[1] for curve in curves])
+    all_y = np.concatenate([curve[2] for curve in curves])
+    x_bounds, y_bounds = bounds(all_x), bounds(all_y)
+    image, draw = canvas("Effective Stress-Strain Curves", "true_strain", "effective_stress_mpa")
+    draw_numeric_ticks(draw, x_bounds, y_bounds)
+
+    for index, (hit_label, x, y) in enumerate(curves):
+        color = PLOT_COLORS[index % len(PLOT_COLORS)]
+        stride = max(1, len(x) // 260)
+        points = [scale_xy(xi, yi, x_bounds, y_bounds) for xi, yi in zip(x[::stride], y[::stride])]
+        if len(points) > 1:
+            draw.line(points, fill=color, width=2)
+
+    legend_font = load_font(15)
+    legend_x = PLOT_WIDTH - MARGIN - 170
+    legend_y = MARGIN + 12
+    draw.rectangle((legend_x - 12, legend_y - 10, PLOT_WIDTH - MARGIN - 8, legend_y + 156), fill="white", outline=(203, 213, 225))
+    draw.text((legend_x, legend_y), f"{len(curves)} curves", fill=COLOR_TEXT, font=legend_font)
+    draw.text((legend_x, legend_y + 24), "Color cycles by hit", fill=COLOR_GRAY, font=legend_font)
+    for i, (hit_label, _x, _y) in enumerate(curves[:6]):
+        color = PLOT_COLORS[i % len(PLOT_COLORS)]
+        y0 = legend_y + 52 + i * 17
+        draw.line((legend_x, y0 + 7, legend_x + 22, y0 + 7), fill=color, width=3)
+        draw.text((legend_x + 30, y0), f"hit {hit_label}", fill=COLOR_TEXT, font=legend_font)
+
+    image.save(output_path)
+    return output_path
+
+
+def curve_hit_number(curve_path: Path) -> int | None:
+    """Read a curve CSV hit number without assuming filename sort order."""
+    try:
+        df = pd.read_csv(curve_path, usecols=["hit"], nrows=1)
+    except Exception:
+        return None
+    if df.empty:
+        return None
+    try:
+        return int(df["hit"].iloc[0])
+    except Exception:
+        return None
+
+
+def representative_curve_paths(curve_dir: str | Path, count: int = 5) -> list[Path]:
+    """Choose representative curve files across the hit sequence."""
+    curve_dir = Path(curve_dir)
+    paths = list(curve_dir.glob("*_stress_strain.csv"))
+    if not paths:
+        return []
+    paths = sorted(paths, key=lambda path: (curve_hit_number(path) if curve_hit_number(path) is not None else 10**9, path.name))
+    if len(paths) <= count:
+        return paths
+    indices = np.linspace(0, len(paths) - 1, count).round().astype(int)
+    return [paths[int(index)] for index in indices]
+
+
+def read_recrystallization_lookup(rx_csv: str | Path | None) -> dict[int, dict]:
+    """Read recrystallization summary rows keyed by hit number."""
+    if rx_csv is None:
+        return {}
+    rx = read_csv(rx_csv)
+    if rx.empty or "hit" not in rx.columns:
+        return {}
+    lookup = {}
+    for _, row in rx.iterrows():
+        try:
+            lookup[int(row["hit"])] = row.to_dict()
+        except Exception:
+            pass
+    return lookup
+
+
+def first_softening_point(
+    strain: np.ndarray,
+    stress: np.ndarray,
+    peak_idx: int,
+    softening_fraction: float = 0.08,
+) -> tuple[float, float] | None:
+    """Find first post-peak point below a chosen softening threshold."""
+    if peak_idx >= len(stress) - 1:
+        return None
+    peak_stress = float(stress[peak_idx])
+    threshold = peak_stress * (1.0 - softening_fraction)
+    post = np.where(stress[peak_idx:] <= threshold)[0]
+    if len(post) == 0:
+        return None
+    idx = int(peak_idx + post[0])
+    return float(strain[idx]), float(stress[idx])
+
+
+def save_single_stress_strain_diagnostic(
+    curve_path: str | Path,
+    output_path: Path,
+    rx_row: dict | None = None,
+    softening_fraction_threshold: float = 0.08,
+) -> Path | None:
+    """Save one annotated stress-strain diagnostic plot."""
+    curve_path = Path(curve_path)
+    df = pd.read_csv(curve_path)
+    if "true_strain" not in df.columns or "effective_stress_mpa" not in df.columns:
+        return None
+    strain = pd.to_numeric(df["true_strain"], errors="coerce").to_numpy(dtype=float)
+    stress = pd.to_numeric(df["effective_stress_mpa"], errors="coerce").to_numpy(dtype=float)
+    valid = np.isfinite(strain) & np.isfinite(stress)
+    strain = strain[valid]
+    stress = stress[valid]
+    if len(stress) < 2:
+        return None
+
+    hit = curve_hit_number(curve_path)
+    peak_idx = int(np.nanargmax(stress))
+    peak_point = (float(strain[peak_idx]), float(stress[peak_idx]))
+    softening_point = first_softening_point(
+        strain,
+        stress,
+        peak_idx,
+        softening_fraction=softening_fraction_threshold,
+    )
+    terminal_point = (float(np.nanmedian(strain[-max(3, len(strain) // 5):])), float(np.nanmedian(stress[-max(3, len(stress) // 5):])))
+
+    x_bounds, y_bounds = bounds(strain), bounds(stress)
+    title = f"Hit {hit} Stress-Strain Diagnostic" if hit is not None else "Stress-Strain Diagnostic"
+    image, draw = canvas(title, "true_strain", "effective_stress_mpa")
+    draw_numeric_ticks(draw, x_bounds, y_bounds)
+
+    stride = max(1, len(strain) // 420)
+    points = [scale_xy(xi, yi, x_bounds, y_bounds) for xi, yi in zip(strain[::stride], stress[::stride])]
+    draw.line(points, fill=COLOR_BLUE, width=4)
+
+    annotation_font = load_font(16)
+    small_font = load_font(14)
+    px, py = scale_xy(*peak_point, x_bounds, y_bounds)
+    draw.ellipse((px - 8, py - 8, px + 8, py + 8), fill=COLOR_RED, outline="white", width=2)
+    draw.text((px + 12, py - 28), f"Peak {peak_point[1]:.1f} MPa", fill=COLOR_RED, font=annotation_font)
+    draw.text((px + 12, py - 8), "softening onset", fill=COLOR_RED, font=small_font)
+
+    if softening_point is not None:
+        sx, sy = scale_xy(*softening_point, x_bounds, y_bounds)
+        draw.ellipse((sx - 7, sy - 7, sx + 7, sy + 7), fill=COLOR_ORANGE, outline="white", width=2)
+        draw.line((px, py, sx, sy), fill=COLOR_ORANGE, width=2)
+        draw.text((sx + 12, sy + 4), f"{softening_fraction_threshold:.0%} softening", fill=COLOR_ORANGE, font=annotation_font)
+
+    tx, ty = scale_xy(*terminal_point, x_bounds, y_bounds)
+    draw.rectangle((tx - 7, ty - 7, tx + 7, ty + 7), fill=COLOR_GREEN, outline="white", width=2)
+    draw.text((tx + 12, ty - 6), f"Terminal ~{terminal_point[1]:.1f} MPa", fill=COLOR_GREEN, font=annotation_font)
+
+    rx_mode = str((rx_row or {}).get("rx_mode", "not classified"))
+    rx_confidence = (rx_row or {}).get("rx_confidence", "")
+    softening_fraction = (rx_row or {}).get("softening_fraction", "")
+    panel_x = MARGIN + 18
+    panel_y = MARGIN + 14
+    draw.rectangle((panel_x - 10, panel_y - 10, panel_x + 440, panel_y + 105), fill="white", outline=(203, 213, 225))
+    draw.text((panel_x, panel_y), f"RX indicator: {rx_mode}", fill=COLOR_TEXT, font=annotation_font)
+    draw.text((panel_x, panel_y + 24), f"confidence: {rx_confidence}", fill=COLOR_TEXT, font=small_font)
+    draw.text((panel_x, panel_y + 45), f"softening fraction: {softening_fraction}", fill=COLOR_TEXT, font=small_font)
+    draw.text((panel_x, panel_y + 66), "Possible DRX when peak + softening + steady terminal slope align.", fill=COLOR_GRAY, font=small_font)
+
+    image.save(output_path)
+    return output_path
+
+
+def save_stress_strain_diagnostics(
+    curve_dir: str | Path,
+    report_dir: str | Path,
+    rx_csv: str | Path | None = None,
+    count: int = 5,
+) -> list[Path]:
+    """Save annotated diagnostic plots for representative stress-strain curves."""
+    report_dir = Path(report_dir)
+    lookup = read_recrystallization_lookup(rx_csv)
+    outputs = []
+    for curve_path in representative_curve_paths(curve_dir, count=count):
+        hit = curve_hit_number(curve_path)
+        name = f"stress_strain_diagnostic_hit{hit}.png" if hit is not None else f"{curve_path.stem}_diagnostic.png"
+        output_path = report_dir / name
+        path = save_single_stress_strain_diagnostic(
+            curve_path,
+            output_path,
+            rx_row=lookup.get(hit) if hit is not None else None,
+        )
+        if path:
+            outputs.append(path)
+    return outputs
 
 
 def dataframe_table_html(df: pd.DataFrame, max_rows: int = 12) -> str:
@@ -142,6 +399,8 @@ def build_experimental_report(
     microstructure_summary_csv: str | Path | None = None,
     calibration_csv: str | Path | None = None,
     uncertainty_csv: str | Path | None = None,
+    stress_strain_curve_dir: str | Path | None = None,
+    recrystallization_csv: str | Path | None = None,
 ) -> dict[str, str]:
     """Build an HTML report and PNG plots for an experimental-analysis folder."""
     output_dir = Path(output_dir)
@@ -171,6 +430,17 @@ def build_experimental_report(
         path = save_bar_plot(list(counts.index), [float(v) for v in counts.values], report_dir / "validation_status_counts.png", "Validation Status Counts", COLOR_RED)
         if path:
             plots.append(path)
+    curve_dir = stress_strain_curve_dir or output_dir / "stress_strain_curves"
+    path = save_stress_strain_overlay(curve_dir, report_dir / "stress_strain_curves.png")
+    if path:
+        plots.append(path)
+    diagnostic_plots = save_stress_strain_diagnostics(
+        curve_dir,
+        report_dir,
+        rx_csv=recrystallization_csv or output_dir / "recrystallization_summary.csv",
+        count=5,
+    )
+    plots.extend(diagnostic_plots)
     if not calibration.empty and "calibration_objective" in calibration.columns:
         calibration = calibration.copy()
         calibration["candidate_order"] = np.arange(1, len(calibration) + 1)
@@ -223,4 +493,3 @@ def build_experimental_report(
         "experimental_report_dir": str(report_dir),
         "experimental_report_plot_count": str(len(plots)),
     }
-
