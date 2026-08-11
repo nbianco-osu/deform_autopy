@@ -65,6 +65,24 @@ research loop.
 - `experimental_analysis/reporting.py`
   - Builds an HTML report and PNG plots without requiring matplotlib.
 
+- `experimental_analysis/pyjmak_adapter.py`
+  - Optionally converts AF hit temperature histories into pyJMAK input files.
+  - Runs ORNL `pyJMAK` when the package is installed or a local checkout path is
+    supplied.
+  - Writes phase-fraction predictions for the automated report.
+
+- `experimental_analysis/local_pyjmak_workpiece.py`
+  - Runs pyJMAK independently on many local/nodal workpiece temperature
+    histories so phase-fraction predictions can be mapped through the
+    workpiece.
+
+- `experimental_analysis/material_data/316L_literature_parameters.json`
+  - Stores literature-backed 316L phase-stability, hot-deformation, and
+    grain-growth priors with source links.
+
+- `experimental_analysis/material_data/pyjmak_316L_stable_austenite_nist.inp`
+  - NIST-backed stable-austenite pyJMAK material input for already-solid 316L.
+
 - `experimental_analysis/fusion.py`
   - Provides conservative fusion strategies: hit-level joining, nearest spatial
     joining, and target-error joining.
@@ -149,6 +167,104 @@ the AF data folder name. Examples:
 - `Box_5_8in` -> `15.875 mm`
 
 You can still pass `stock_diameter_mm=...` to override this.
+
+## Optional pyJMAK Integration
+
+ORNL `pyJMAK` models solid-state phase transformations from a time-temperature
+history and an Abaqus-style phase-transformation material input file. The
+adapter is optional so the AF processing workflow still runs when `pyJMAK` is
+not installed.
+
+Install or clone `pyJMAK` separately, then either install it into the active
+Spyder environment:
+
+```powershell
+pip install -e "C:\path\to\pyJMAK"
+```
+
+or pass the checkout path directly:
+
+```python
+result = run_experimental_analysis(
+    raw_af_data_dir=r"C:\path\to\AF Data\Box_1in",
+    output_dir=r"C:\path\to\AF Data\Box_1in\experimental_analysis_output",
+    pyjmak_material_input_file=r"C:\path\to\abq_phase_trans_input-Steel.inp",
+    pyjmak_source_path=r"C:\path\to\pyJMAK",
+)
+```
+
+The pipeline writes:
+
+- `pyjmak_temperature_history.csv`
+- `pyjmak_phase_fractions.csv`
+- `pyjmak_phase_fractions_summary.json`
+- `report/pyjmak_phase_fractions.png`
+
+The temperature history is built from the processed AF hit curves in numeric hit
+order. Use `pyjmak_inter_hit_gap_s` if a known lag time should be inserted
+between hits.
+
+### 316L Interpretation
+
+The codebase now includes a stable-austenite 316L starting file:
+
+```text
+C:\Users\nbian\Documents\DEFORM API\experimental_analysis\material_data\pyjmak_316L_stable_austenite_nist.inp
+```
+
+This file uses measured 316L solidus/liquidus values from NIST SRM 316L
+thermophysical-property work and defines one solid phase, Austenite, with
+initial fraction 1.0. It is the defensible default for AF thermal histories that
+remain below melting and do not have calibrated evidence of secondary phase
+evolution. It does not predict DRX, SRX, MDRX, or grain growth.
+
+The supporting literature-prior file is:
+
+```text
+C:\Users\nbian\Documents\DEFORM API\experimental_analysis\material_data\316L_literature_parameters.json
+```
+
+Use that JSON as a transparent place to track values gathered from literature
+before fitting AF-specific model parameters.
+
+### Local Workpiece pyJMAK Predictions
+
+To run pyJMAK through the workpiece, export or assemble a CSV containing one
+thermal history per node, element, or sampling point:
+
+```csv
+location_id,time_s,temperature_c,x_mm,y_mm,z_mm
+101,0.00,1050.0,0.0,0.0,0.0
+101,0.05,1048.2,0.0,0.0,0.0
+102,0.00,998.0,3.0,0.0,0.0
+102,0.05,996.5,3.0,0.0,0.0
+```
+
+Accepted aliases include `node_id`, `element_id`, or `point_id` for
+`location_id`, and common variants of `time_s` and `temperature_c`.
+
+Command-line example:
+
+```powershell
+python experimental_analysis_pipeline.py `
+  --raw-af-data-dir "C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in" `
+  --output-dir "C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in\experimental_analysis_output" `
+  --pyjmak-material-input-file "C:\Users\nbian\Documents\DEFORM API\experimental_analysis\material_data\pyjmak_316L_stable_austenite_nist.inp" `
+  --local-temperature-history-csv "C:\path\to\deform_local_temperature_histories.csv"
+```
+
+Outputs are written under `local_pyjmak`:
+
+- `local_temperature_histories_normalized.csv`
+- `local_pyjmak_phase_fractions.csv`
+- `local_pyjmak_phase_summary.csv`
+- one per-location phase-fraction CSV in `local_phase_fraction_files`
+
+For 316L with the stable-austenite file, the expected result is local
+`phase_fraction_Austenite = 1.0` wherever the local temperature path remains in
+the solid, stable-austenite range. Recrystallization and grain-size predictions
+should be handled by the AF recrystallization/grain model and calibrated to
+post-hit microstructure data.
 
 ## Target CSV Format
 

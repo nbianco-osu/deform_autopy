@@ -29,8 +29,10 @@ import pandas as pd
 from experimental_analysis.af_signal_processing import process_af_folder
 from experimental_analysis.calibration import run_default_calibration
 from experimental_analysis.fusion import add_target_errors, load_table
+from experimental_analysis.local_pyjmak_workpiece import run_pyjmak_for_local_histories
 from experimental_analysis.microstructure_import import write_microstructure_import_outputs
 from experimental_analysis.microstructure_targets import load_targets_csv
+from experimental_analysis.pyjmak_adapter import run_pyjmak_from_curve_folder
 from experimental_analysis.recrystallization import analyze_curve_folder
 from experimental_analysis.reporting import build_experimental_report
 from experimental_analysis.schema import (
@@ -87,6 +89,11 @@ def run_experimental_analysis(
     microstructure_targets_csv: str | Path | None = None,
     experimental_microstructure_path: str | Path | None = None,
     calibration_targets_csv: str | Path | None = None,
+    pyjmak_material_input_file: str | Path | None = None,
+    pyjmak_source_path: str | Path | None = None,
+    pyjmak_inter_hit_gap_s: float = 0.0,
+    local_temperature_history_csv: str | Path | None = None,
+    local_pyjmak_max_locations: int | None = None,
     hit_glob: str = "*.csv",
     stock_diameter_mm: float | None = None,
     initial_height_mm: float | None = None,
@@ -199,6 +206,36 @@ def run_experimental_analysis(
         else:
             outputs["calibration_warning"] = "run_calibration was true, but no calibration target CSV was provided."
 
+    if pyjmak_material_input_file:
+        try:
+            outputs.update(
+                run_pyjmak_from_curve_folder(
+                    curve_dir=curve_dir,
+                    output_dir=output_dir,
+                    material_input_file=pyjmak_material_input_file,
+                    source_path=pyjmak_source_path,
+                    inter_hit_gap_s=pyjmak_inter_hit_gap_s,
+                )
+            )
+        except Exception as exc:
+            outputs["pyjmak_warning"] = str(exc)
+
+    if local_temperature_history_csv and pyjmak_material_input_file:
+        try:
+            outputs.update(
+                run_pyjmak_for_local_histories(
+                    local_temperature_csv=local_temperature_history_csv,
+                    output_dir=output_dir / "local_pyjmak",
+                    material_input_file=pyjmak_material_input_file,
+                    source_path=pyjmak_source_path,
+                    max_locations=local_pyjmak_max_locations,
+                )
+            )
+        except Exception as exc:
+            outputs["local_pyjmak_warning"] = str(exc)
+    elif local_temperature_history_csv and not pyjmak_material_input_file:
+        outputs["local_pyjmak_warning"] = "local_temperature_history_csv was provided, but pyjmak_material_input_file was not provided."
+
     config_json = output_dir / "experimental_analysis_config.json"
     config_json.write_text(json.dumps(dataclass_to_dict(config), indent=2), encoding="utf-8")
     outputs["config_json"] = str(config_json)
@@ -222,6 +259,11 @@ def main() -> None:
     parser.add_argument("--microstructure-targets-csv", default=None, help="Optional target CSV.")
     parser.add_argument("--experimental-microstructure-path", default=None, help="Optional measured microstructure CSV or folder.")
     parser.add_argument("--calibration-targets-csv", default=None, help="Optional calibration target CSV.")
+    parser.add_argument("--pyjmak-material-input-file", default=None, help="Optional Abaqus-style pyJMAK phase-transformation input file.")
+    parser.add_argument("--pyjmak-source-path", default=None, help="Optional local ORNL/pyJMAK checkout path.")
+    parser.add_argument("--pyjmak-inter-hit-gap-s", type=float, default=0.0, help="Optional time gap inserted between AF hits in pyJMAK temperature history.")
+    parser.add_argument("--local-temperature-history-csv", default=None, help="Optional local/nodal workpiece thermal-history CSV for pointwise pyJMAK predictions.")
+    parser.add_argument("--local-pyjmak-max-locations", type=int, default=None, help="Optional limit on local pyJMAK locations for testing large exports.")
     parser.add_argument("--hit-glob", default="*.csv", help="Glob pattern for AF hit files.")
     parser.add_argument(
         "--stock-diameter-mm",
@@ -243,6 +285,11 @@ def main() -> None:
         microstructure_targets_csv=args.microstructure_targets_csv,
         experimental_microstructure_path=args.experimental_microstructure_path,
         calibration_targets_csv=args.calibration_targets_csv,
+        pyjmak_material_input_file=args.pyjmak_material_input_file,
+        pyjmak_source_path=args.pyjmak_source_path,
+        pyjmak_inter_hit_gap_s=args.pyjmak_inter_hit_gap_s,
+        local_temperature_history_csv=args.local_temperature_history_csv,
+        local_pyjmak_max_locations=args.local_pyjmak_max_locations,
         hit_glob=args.hit_glob,
         stock_diameter_mm=args.stock_diameter_mm,
         initial_height_mm=args.initial_height_mm,
