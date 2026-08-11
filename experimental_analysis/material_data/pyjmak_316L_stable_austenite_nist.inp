@@ -1,0 +1,31 @@
+**--------------------------------------------------
+** Literature-backed pyJMAK material input for AISI 316L stainless steel.
+**
+** Scope:
+**   This is a stable-austenite phase-fraction model for already-solid 316L
+**   forging histories. It is intended for pyJMAK thermal-history evaluation,
+**   not for calibrated recrystallization, static recrystallization, MDRX, or
+**   grain-growth prediction.
+**
+** Literature basis:
+**   NIST SRM 316L thermophysical measurements report Ts = 1675 K and
+**   Tl = 1708 K. Converted to Celsius, this is approximately 1401.85 C and
+**   1434.85 C. AF hot-forging histories below this range remain solid.
+**
+** Interpretation:
+**   For local thermal histories that do not melt the material, pyJMAK should
+**   return Austenite = 1.0 throughout the workpiece. If future measurements
+**   show delta ferrite, sigma, carbide/nitride evolution, or melting, replace
+**   this file with calibrated transformation tables.
+**--------------------------------------------------
+*PARAMETER TABLE, TYPE="ABQ_PHASE_TRANS_MeltingTemperature"
+ 1401.85, 1434.85
+**--------------------------------------------------
+*PARAMETER TABLE, TYPE="ABQ_PHASE_TRANS_SolidPhases"
+ "Austenite", 1.
+**--------------------------------------------------
+*PARAMETER TABLE, TYPE="ABQ_PHASE_TRANS_Transformations"
+** No solid-state phase transformations are defined for this stable baseline.
+**--------------------------------------------------
+*PARAMETER TABLE, TYPE="ABQ_PHASE_TRANS_FieldVariables"
+ 1, RLS

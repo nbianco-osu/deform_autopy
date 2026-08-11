@@ -1,0 +1,135 @@
+{
+  "material": "AISI 316L stainless steel",
+  "purpose": "Literature-backed starting data for pyJMAK phase stability and local AF microstructure modeling.",
+  "status": "research_prior_not_final_calibration",
+  "phase_stability": {
+    "baseline_assumption": "Solid 316L is treated as stable austenite for Agility Forge hot-forging thermal histories unless calibrated evidence indicates ferrite, sigma, carbide, nitride, melting, or martensite formation.",
+    "solid_phases_for_pyjmak": [
+      {
+        "name": "Austenite",
+        "initial_fraction": 1.0
+      }
+    ],
+    "solidus_temperature_k": {
+      "value": 1675.0,
+      "uncertainty_k": 15.0,
+      "source_id": "nist_srm_316l_thermophysical"
+    },
+    "liquidus_temperature_k": {
+      "value": 1708.0,
+      "uncertainty_k": 30.0,
+      "source_id": "nist_srm_316l_thermophysical"
+    },
+    "solidus_temperature_c": 1401.85,
+    "liquidus_temperature_c": 1434.85,
+    "latent_heat_fusion_kj_per_kg": {
+      "value": 290.0,
+      "source_id": "nist_srm_316l_thermophysical"
+    },
+    "notes": [
+      "These temperatures are above the AF Box_1in measured thermal-camera history processed so far, so pyJMAK phase fractions should remain austenite=1.0 for that case.",
+      "This file does not define recrystallization kinetics in pyJMAK; pyJMAK's public examples are phase-transformation oriented."
+    ]
+  },
+  "hot_deformation_and_recrystallization_priors": {
+    "drx_activation_energy_kj_per_mol": [
+      {
+        "value": 460.0,
+        "source_id": "ded_316l_drx_threshold"
+      },
+      {
+        "value": 465.532,
+        "source_id": "chen_316l_3d_processing_map"
+      }
+    ],
+    "drx_processing_window": {
+      "temperature_c": [
+        1040.0,
+        1100.0
+      ],
+      "strain_rate_per_s": [
+        0.01,
+        0.056
+      ],
+      "source_id": "chen_316l_3d_processing_map"
+    },
+    "critical_strain_model": {
+      "equation": "epsilon_c = 0.009 * Z^0.084, Z = strain_rate * exp(Q / (R*T_K))",
+      "source_id": "ded_316l_drx_threshold",
+      "notes": "Use as a DRX activation screen until AF-specific stress-strain and microscopy data calibrate the constants."
+    },
+    "grain_growth_priors": [
+      {
+        "temperature_range_c": "lower/high-temperature split not fully digitized from abstract",
+        "activation_energy_kj_per_mol": [
+          52.0,
+          317.0
+        ],
+        "source_id": "kashyap_tangri_316l_grain_growth"
+      },
+      {
+        "temperature_c": [
+          900.0,
+          1000.0,
+          1100.0,
+          1200.0
+        ],
+        "holding_time_s": [
+          30.0,
+          60.0,
+          120.0,
+          240.0
+        ],
+        "grain_size_um_table": [
+          [20.0, 25.0, 27.0, 30.0],
+          [28.0, 33.0, 35.0, 37.0],
+          [40.0, 43.0, 47.0, 50.0],
+          [63.0, 94.0, 113.0, 131.0]
+        ],
+        "activation_energy_kj_per_mol_by_temperature": {
+          "900": 110.0,
+          "1000": 96.0,
+          "1100": 84.0,
+          "1200": 62.0
+        },
+        "source_id": "mat_2022_ss316l_grain_growth"
+      }
+    ],
+    "notes": [
+      "The recrystallization/grain-growth values are starting priors, not pyJMAK phase-transformation tables.",
+      "Use local DEFORM temperature, strain, strain-rate, and lag histories plus post-hit grain measurements to calibrate a separate RX/grain model."
+    ]
+  },
+  "sources": {
+    "pyjmak": {
+      "title": "ORNL/pyJMAK",
+      "url": "https://github.com/ORNL/pyJMAK",
+      "used_for": "Confirms pyJMAK supports Abaqus-like phase transformation tables, JMAK/KM kinetics, and time-resolved phase fractions."
+    },
+    "nist_srm_316l_thermophysical": {
+      "title": "Measurements of thermophysical properties of solid and liquid NIST SRM 316L stainless steel",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8193647/",
+      "used_for": "Solidus/liquidus temperatures and latent heat of fusion for 316L."
+    },
+    "chen_316l_3d_processing_map": {
+      "title": "Investigation on the Hot Deformation Behavior of 316L Stainless Steel Using 3D Processing Map",
+      "url": "https://doi.org/10.1007/s12666-019-01674-4",
+      "used_for": "316L hot-deformation activation energy and DRX-friendly processing window."
+    },
+    "ded_316l_drx_threshold": {
+      "title": "Study on Dynamic Recrystallization under Thermal Cycles in the Process of Direct Energy Deposition for 316L Austenitic Stainless Steel",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11477579/",
+      "used_for": "316L DRX activation energy and critical strain/Zener-Hollomon screening equation."
+    },
+    "kashyap_tangri_316l_grain_growth": {
+      "title": "Grain growth behaviour of type 316L stainless steel",
+      "url": "https://doi.org/10.1016/0921-5093(92)90392-E",
+      "used_for": "316L grain-growth activation energy priors."
+    },
+    "mat_2022_ss316l_grain_growth": {
+      "title": "Experimental Analysis on Grain Growth Kinetics of SS316L Austenitic Stainless Steel",
+      "url": "https://www.researchgate.net/publication/363276510_Experimental_Analysis_on_Grain_Growth_Kinetics_of_SS316L_Austenitic_Stainless_Steel",
+      "used_for": "Digitized holding-time/temperature/grain-size table and approximate activation-energy range."
+    }
+  }
+}
