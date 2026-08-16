@@ -385,6 +385,54 @@ def save_stress_strain_diagnostics(
     return outputs
 
 
+def save_phase_fraction_plot(
+    phase_csv: str | Path,
+    output_path: Path,
+) -> Path | None:
+    """Save a pyJMAK phase-fraction plot when phase predictions exist."""
+    df = read_csv(phase_csv)
+    if df.empty or "time_s" not in df.columns:
+        return None
+    phase_columns = [column for column in df.columns if column.startswith("phase_fraction_")]
+    if not phase_columns:
+        return None
+
+    time = pd.to_numeric(df["time_s"], errors="coerce").to_numpy(dtype=float)
+    values = []
+    for column in phase_columns:
+        y = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
+        valid = np.isfinite(time) & np.isfinite(y)
+        if valid.sum() >= 2:
+            values.append((column.replace("phase_fraction_", ""), time[valid], y[valid]))
+    if not values:
+        return None
+
+    x_bounds = bounds(np.concatenate([item[1] for item in values]))
+    y_bounds = (0.0, 1.0)
+    image, draw = canvas("pyJMAK Phase Fraction Predictions", "time_s", "phase_fraction")
+    draw_numeric_ticks(draw, x_bounds, y_bounds)
+    for index, (phase, x, y) in enumerate(values):
+        color = PLOT_COLORS[index % len(PLOT_COLORS)]
+        stride = max(1, len(x) // 360)
+        points = [scale_xy(xi, yi, x_bounds, y_bounds) for xi, yi in zip(x[::stride], y[::stride])]
+        if len(points) > 1:
+            draw.line(points, fill=color, width=3)
+
+    legend_font = load_font(15)
+    legend_x = PLOT_WIDTH - MARGIN - 190
+    legend_y = MARGIN + 12
+    legend_height = min(180, 42 + 20 * len(values))
+    draw.rectangle((legend_x - 12, legend_y - 10, PLOT_WIDTH - MARGIN - 8, legend_y + legend_height), fill="white", outline=(203, 213, 225))
+    draw.text((legend_x, legend_y), "Phases", fill=COLOR_TEXT, font=legend_font)
+    for index, (phase, _x, _y) in enumerate(values[:7]):
+        color = PLOT_COLORS[index % len(PLOT_COLORS)]
+        y0 = legend_y + 28 + index * 20
+        draw.line((legend_x, y0 + 7, legend_x + 22, y0 + 7), fill=color, width=3)
+        draw.text((legend_x + 30, y0), phase[:18], fill=COLOR_TEXT, font=legend_font)
+    image.save(output_path)
+    return output_path
+
+
 def dataframe_table_html(df: pd.DataFrame, max_rows: int = 12) -> str:
     """Convert a DataFrame preview to a compact HTML table."""
     if df.empty:
@@ -401,6 +449,7 @@ def build_experimental_report(
     uncertainty_csv: str | Path | None = None,
     stress_strain_curve_dir: str | Path | None = None,
     recrystallization_csv: str | Path | None = None,
+    pyjmak_phase_csv: str | Path | None = None,
 ) -> dict[str, str]:
     """Build an HTML report and PNG plots for an experimental-analysis folder."""
     output_dir = Path(output_dir)
@@ -421,6 +470,8 @@ def build_experimental_report(
             ("max_force_kn", "Maximum Force by Hit", COLOR_BLUE),
             ("depth_mm", "Penetration Depth by Hit", COLOR_ORANGE),
             ("softening_fraction", "Softening Fraction by Hit", COLOR_GREEN),
+            ("total_recrystallized_fraction", "Mixed DRX/MDRX/SRX Fraction by Hit", COLOR_PURPLE),
+            ("updated_grain_um", "Predicted Grain Size by Hit", COLOR_BLUE),
         ]:
             path = save_line_plot(af, "row_order", column, report_dir / f"{column}_by_hit.png", title, color=color)
             if path:
@@ -441,6 +492,12 @@ def build_experimental_report(
         count=5,
     )
     plots.extend(diagnostic_plots)
+    phase_path = save_phase_fraction_plot(
+        pyjmak_phase_csv or output_dir / "pyjmak_phase_fractions.csv",
+        report_dir / "pyjmak_phase_fractions.png",
+    )
+    if phase_path:
+        plots.append(phase_path)
     if not calibration.empty and "calibration_objective" in calibration.columns:
         calibration = calibration.copy()
         calibration["candidate_order"] = np.arange(1, len(calibration) + 1)
