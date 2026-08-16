@@ -58,6 +58,37 @@
       "source_id": "ded_316l_drx_threshold",
       "notes": "Use as a DRX activation screen until AF-specific stress-strain and microscopy data calibrate the constants."
     },
+    "implemented_mixed_model_defaults": {
+      "code_file": "experimental_analysis/rex_kinetics.py",
+      "status": "transparent defaults for screening; calibrate before thesis-level quantitative claims",
+      "drx": {
+        "family": "Yada/Sellars strain-form Avrami with Zener-Hollomon critical strain",
+        "critical_strain": "epsilon_c = 0.009 * Z^0.084",
+        "fraction": "X_DRX = 1 - exp[-0.693*((epsilon - epsilon_c)/(epsilon_0.5 - epsilon_c))^n]",
+        "default_avrami_exponent": 2.0,
+        "default_epsilon_0.5": "max(1.8*epsilon_c, epsilon_c + 0.02)"
+      },
+      "srx": {
+        "family": "Sellars-style static recrystallization",
+        "t05": "t_0.5 = A * epsilon^p * d0^q * strain_rate^s * Z^r * exp(Q_RX/(R*T))",
+        "default_A": 2.5e-19,
+        "default_p": -4.0,
+        "default_q": 2.0,
+        "default_Q_RX_j_mol": 300000.0,
+        "default_avrami_exponent": 1.7,
+        "source_id": "sellars_srx_overview"
+      },
+      "mdrx": {
+        "family": "Yada/Senuma-style metadynamic recrystallization",
+        "t05": "t_0.5 = A * epsilon^n * strain_rate^m * exp(Q_MDRX/(R*T))",
+        "fraction": "X_MDRX = 1 - exp[-0.693*(t/t_0.5)^k]",
+        "default_A": 1.73e-7,
+        "default_n": -0.33,
+        "default_Q_MDRX_j_mol": 191000.0,
+        "default_avrami_exponent": 0.5,
+        "source_id": "stainless_mdrx_prior"
+      }
+    },
     "grain_growth_priors": [
       {
         "temperature_range_c": "lower/high-temperature split not fully digitized from abstract",
@@ -130,6 +161,16 @@
       "title": "Experimental Analysis on Grain Growth Kinetics of SS316L Austenitic Stainless Steel",
       "url": "https://www.researchgate.net/publication/363276510_Experimental_Analysis_on_Grain_Growth_Kinetics_of_SS316L_Austenitic_Stainless_Steel",
       "used_for": "Digitized holding-time/temperature/grain-size table and approximate activation-energy range."
+    },
+    "sellars_srx_overview": {
+      "title": "Static Recrystallization - overview of Sellars-type models",
+      "url": "https://www.sciencedirect.com/topics/engineering/static-recrystallization",
+      "used_for": "Generic Sellars-style SRX t0.5 and Avrami-form kinetics."
+    },
+    "stainless_mdrx_prior": {
+      "title": "Dynamic and Metadynamic Recrystallization of a Martensitic Precipitation Hardenable Stainless Steel",
+      "url": "https://www.tandfonline.com/doi/abs/10.1179/cmq.2007.46.2.189",
+      "used_for": "Default MDRX time-to-half and Avrami exponent prior when AF-specific 316L MDRX constants are not yet calibrated."
     }
   }
 }

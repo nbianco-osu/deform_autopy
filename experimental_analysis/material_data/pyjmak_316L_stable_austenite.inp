@@ -1,0 +1,26 @@
+**--------------------------------------------------
+** Baseline pyJMAK material input for AISI 316L stainless steel.
+**
+** Purpose:
+**   316L is an austenitic stainless steel. The ORNL pyJMAK repository includes
+**   generic steel and SS410 examples, but no 316L-specific transformation file.
+**   This file is therefore a conservative stable-austenite baseline for AF hot
+**   forging temperature histories. It should not be treated as calibrated DRX,
+**   SRX, MDRX, or grain-growth kinetics.
+**
+** Use:
+**   Use this only to exercise the pyJMAK phase-fraction workflow for 316L.
+**   Replace it with literature- or experiment-calibrated 316L data before
+**   using phase predictions as a research result.
+**--------------------------------------------------
+*PARAMETER TABLE, TYPE="ABQ_PHASE_TRANS_MeltingTemperature"
+ 1375., 1400.
+**--------------------------------------------------
+*PARAMETER TABLE, TYPE="ABQ_PHASE_TRANS_SolidPhases"
+ "Austenite", 1.
+**--------------------------------------------------
+*PARAMETER TABLE, TYPE="ABQ_PHASE_TRANS_Transformations"
+** No phase transformations are defined in this baseline.
+**--------------------------------------------------
+*PARAMETER TABLE, TYPE="ABQ_PHASE_TRANS_FieldVariables"
+ 1, RLS
