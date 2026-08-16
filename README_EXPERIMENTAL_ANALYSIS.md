@@ -37,6 +37,22 @@ research loop.
     curves.
   - Uses peak stress, post-peak softening fraction, and terminal slope.
 
+- `experimental_analysis/rex_kinetics.py`
+  - Calculates mixed DRX, MDRX, and SRX fractions using parameterized
+    Yada/Senuma, Sellars, and Zener-Hollomon based model forms.
+  - Runs hit-level kinetics from AF stress-strain curves or local/nodal
+    kinetics from DEFORM thermomechanical-history CSVs.
+
+- `experimental_analysis/induction_heating.py`
+  - Infers initial heating and reheating events from hit temperatures.
+  - Flags hits outside the selected AF process window.
+  - Writes an induction-heating schedule plot and CSV event table.
+
+- `experimental_analysis/microstructure_evolution.py`
+  - Couples the reconstructed temperature history with hit-level deformation.
+  - Evaluates DRX at each hit and SRX/MDRX during interpass thermal intervals.
+  - Writes a hit-by-hit grain size and recrystallized-fraction history.
+
 - `experimental_analysis/microstructure_targets.py`
   - Defines scalar and distributional microstructure targets.
   - Computes target errors and simple distribution distances.
@@ -89,6 +105,10 @@ research loop.
 
 - `experimental_analysis_pipeline.py`
   - Wrapper script that runs the experimental processing workflow.
+
+- `model_microstructure_evolution.py`
+  - Convenience wrapper for running the Box_1in thermal-deformation
+    microstructure evolution workflow.
 
 ## Scientifically Defensible Starting Strategy
 
@@ -299,6 +319,181 @@ Supported normalized fields include:
 
 All original source columns are preserved with a `source_` prefix.
 
+## Mixed DRX, MDRX, and SRX Kinetics
+
+The mixed recrystallization layer is separate from pyJMAK. pyJMAK handles
+phase-fraction histories from temperature. DRX/MDRX/SRX calculations need
+thermomechanical history: strain, strain rate, temperature, starting grain size,
+and interpass/lag time.
+
+The implemented model families are:
+
+- **DRX activation:** `Z = strain_rate * exp(Q / (R*T_K))`, then
+  `epsilon_c = 0.009 * Z^0.084` as a 316L literature-prior screen.
+- **DRX fraction:** Yada/Sellars strain-form Avrami expression,
+  `X_DRX = 1 - exp[-0.693*((epsilon - epsilon_c)/(epsilon_0.5 - epsilon_c))^n]`.
+- **SRX fraction:** Sellars-style static recrystallization timing,
+  `t_0.5 = A * epsilon^p * d0^q * strain_rate^s * Z^r * exp(Q_RX/(R*T_K))`,
+  followed by `X_SRX = 1 - exp[-0.693*(t/t_0.5)^n]`.
+- **MDRX fraction:** Yada/Senuma-style metadynamic timing,
+  `t_0.5 = A * epsilon^n * strain_rate^m * exp(Q_MDRX/(R*T_K))`,
+  followed by `X_MDRX = 1 - exp[-0.693*(t/t_0.5)^k]`.
+
+The default coefficients are screening priors stored in:
+
+```text
+C:\Users\nbian\Documents\DEFORM API\experimental_analysis\material_data\316L_literature_parameters.json
+```
+
+Run hit-level kinetics from processed AF curves:
+
+```powershell
+python experimental_analysis_pipeline.py `
+  --raw-af-data-dir "C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in" `
+  --output-dir "C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in\experimental_analysis_output" `
+  --run-rex-kinetics `
+  --initial-grain-size-um 26.3 `
+  --rex-interpass-time-s 1.0
+```
+
+For local/nodal DEFORM histories, provide location, temperature, and strain.
+Strain rate can be supplied directly or estimated from strain versus time:
+
+```csv
+location_id,time_s,temperature_c,true_strain,strain_rate_s,x_mm,y_mm,z_mm
+101,0.00,1050.0,0.00,0.10,0.0,0.0,0.0
+101,0.10,1048.0,0.05,0.10,0.0,0.0,0.0
+102,0.00,990.0,0.00,0.04,3.0,0.0,0.0
+102,0.10,988.0,0.02,0.04,3.0,0.0,0.0
+```
+
+Command example:
+
+```powershell
+python experimental_analysis_pipeline.py `
+  --raw-af-data-dir "C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in" `
+  --output-dir "C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in\experimental_analysis_output" `
+  --run-rex-kinetics `
+  --local-thermomechanical-history-csv "C:\path\to\deform_local_thermomechanical_histories.csv"
+```
+
+Treat the resulting fractions and grain sizes as screening predictions until
+they are calibrated against measured microstructure and DEFORM JMAK output.
+
+## Induction Heating Schedule Inference
+
+The induction-heating model uses the fact that AF temperatures are reported when
+each hit occurs. It does not yet solve coil physics. Instead, it infers when
+heating must have occurred:
+
+- the first heating event raises the workpiece from room temperature to hit 0;
+- a reheat is inferred when temperature increases between consecutive hits by
+  at least `reheat_delta_c`;
+- a hit below the lower temperature limit is flagged as needing reheat;
+- a hit above the upper temperature limit is flagged as outside the process
+  window.
+- when global timestamps are available, the initial room-temperature heat is
+  applied to the exported thermal history. If no heating rate is supplied, its
+  duration is inferred from the mean apparent reheat rate measured later in the
+  same hit sequence.
+- a final quench segment is appended after the last hit by default so the
+  thermal history can be used for microstructure modeling.
+
+Default process window:
+
+```text
+800-1200 C
+```
+
+Run from Spyder:
+
+```python
+from model_induction_heating import run_default_box_analysis
+
+result = run_default_box_analysis()
+print(result)
+```
+
+Run from the command line:
+
+```powershell
+python model_induction_heating.py `
+  --raw-af-data-dir "C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in" `
+  --output-dir "C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in\experimental_analysis_output\induction_heating" `
+  --lower-temp-c 800 `
+  --upper-temp-c 1200 `
+  --room-temp-c 25 `
+  --reheat-delta-c 25 `
+  --target-reheat-temp-c 1100
+```
+
+Useful options:
+
+- `--heating-rate-c-per-s`: use a known induction heating rate.
+- `--no-infer-initial-heat-from-reheats`: do not infer the initial heat duration
+  from later reheat windows.
+- `--quench-duration-s`: assumed quench duration when no quench rate is known.
+- `--quench-rate-c-per-s`: use a known quench cooling rate.
+- `--no-quench-after-hits`: skip the final quench segment.
+
+Outputs:
+
+- `induction_heating_hit_temperatures.csv`
+- `induction_heating_events.csv`
+- `induction_heating_schedule.png`
+- `induction_heating_events_plot.png`
+- `induction_heating_reheat_durations.png`
+- `induction_heating_temperature_vs_time.png`
+- `induction_heating_temperature_time_trace.csv`
+- `induction_heating_full_hit_temperature_traces.csv`
+- `induction_heating_config.json`
+- `induction_heating_summary.json`
+
+## Thermal-Deformation Microstructure Evolution
+
+After stress-strain curves and the induction-heating temperature trace exist,
+run the event-based microstructure model:
+
+```powershell
+python model_microstructure_evolution.py --initial-grain-size-um 26.3
+```
+
+To calibrate the model to a measured final average grain size, pass the target
+value:
+
+```powershell
+python model_microstructure_evolution.py --initial-grain-size-um 26.3 --target-final-grain-size-um 33.7
+```
+
+This currently fits one transparent parameter, `srx.srx_grain_prefactor`, while
+leaving the SRX/DRX/MDRX time, temperature, strain, and Avrami exponents fixed.
+For the Box_1in 316L example, a `33.7 um` final target scales the SRX grain-size
+prefactor from `343.0` to approximately `1648.45`.
+
+The default wrapper uses:
+
+- `stress_strain_curves/*_stress_strain.csv`
+- `induction_heating/induction_heating_temperature_time_trace.csv`
+- initial supplier/measured mean grain size of `26.3 um` unless overridden
+
+The model evaluates dynamic recrystallization during each hit from the effective
+strain, strain rate, stress, and temperature. It then evaluates static and
+metadynamic recrystallization during the thermal interval before the next hit.
+The final quench is included in the thermal history, but SRX during quench is
+disabled by default because the time is short and the temperature drops rapidly.
+
+Outputs are written to `microstructure_evolution/`:
+
+- `microstructure_evolution.csv`
+- `microstructure_evolution.png`
+- `microstructure_evolution_parameters.json`
+- `microstructure_evolution_summary.json`
+
+Treat these predictions as a screening model until the kinetics are calibrated
+against measured microstructure and/or DEFORM JMAK fields. The current
+coefficients are transparent starting priors, not final 316L AF calibration
+constants.
+
 ## Calibration Workflow
 
 The first calibration workflow is a transparent grid search. It evaluates simple
@@ -344,6 +539,17 @@ The wrapper writes:
 - `af_hit_signal_summary.csv`
 - `stress_strain_curves/*_stress_strain.csv`
 - `recrystallization_summary.csv`
+- `recrystallization_kinetics_summary.csv` when `--run-rex-kinetics` is enabled
+- `local_rex_kinetics_summary.csv` when a local thermomechanical history CSV is
+  provided
+- `induction_heating/induction_heating_events.csv` when the induction-heating
+  script is run
+- `induction_heating/induction_heating_schedule.png` when the induction-heating
+  script is run
+- `microstructure_evolution/microstructure_evolution.csv` when thermal-
+  deformation microstructure evolution is run
+- `microstructure_evolution/microstructure_evolution.png` when thermal-
+  deformation microstructure evolution is run
 - `stress_strain_validation.csv`
 - `af_validation_summary.csv`
 - `af_experimental_features.csv`

@@ -34,6 +34,10 @@ from experimental_analysis.microstructure_import import write_microstructure_imp
 from experimental_analysis.microstructure_targets import load_targets_csv
 from experimental_analysis.pyjmak_adapter import run_pyjmak_from_curve_folder
 from experimental_analysis.recrystallization import analyze_curve_folder
+from experimental_analysis.rex_kinetics import (
+    run_rex_kinetics_on_curve_folder,
+    run_rex_kinetics_on_local_histories,
+)
 from experimental_analysis.reporting import build_experimental_report
 from experimental_analysis.schema import (
     AFColumnMap,
@@ -53,6 +57,8 @@ DEFAULT_UNCERTAINTY_COLUMNS = [
     "contact_temperature_c",
     "peak_stress_mpa",
     "softening_fraction",
+    "total_recrystallized_fraction",
+    "updated_grain_um",
 ]
 
 
@@ -94,6 +100,10 @@ def run_experimental_analysis(
     pyjmak_inter_hit_gap_s: float = 0.0,
     local_temperature_history_csv: str | Path | None = None,
     local_pyjmak_max_locations: int | None = None,
+    run_rex_kinetics: bool = False,
+    rex_interpass_time_s: float = 1.0,
+    initial_grain_size_um: float = 26.3,
+    local_thermomechanical_history_csv: str | Path | None = None,
     hit_glob: str = "*.csv",
     stock_diameter_mm: float | None = None,
     initial_height_mm: float | None = None,
@@ -138,6 +148,16 @@ def run_experimental_analysis(
     rx_csv = output_dir / "recrystallization_summary.csv"
     rx_df = analyze_curve_folder(curve_dir, output_csv=rx_csv, config=config.recrystallization)
 
+    rex_kinetics_csv = output_dir / "recrystallization_kinetics_summary.csv"
+    rex_df = pd.DataFrame()
+    if run_rex_kinetics:
+        rex_df = run_rex_kinetics_on_curve_folder(
+            curve_dir=curve_dir,
+            output_csv=rex_kinetics_csv,
+            initial_grain_size_um=initial_grain_size_um,
+            interpass_time_s=rex_interpass_time_s,
+        )
+
     hit_validation = validate_hit_summary(summary_df)
     curve_validation_csv = output_dir / "stress_strain_validation.csv"
     curve_validation = validate_curve_folder(curve_dir, output_csv=curve_validation_csv)
@@ -158,6 +178,15 @@ def run_experimental_analysis(
         combined_csv = output_dir / "af_experimental_features.csv"
         combined.to_csv(combined_csv, index=False)
 
+    if not rex_df.empty and "hit" in combined.columns and "hit" in rex_df.columns:
+        combined = combined.merge(
+            rex_df,
+            on="hit",
+            how="left",
+            suffixes=("", "_rex"),
+        )
+        combined.to_csv(combined_csv, index=False)
+
     uncertainty_columns = [column for column in DEFAULT_UNCERTAINTY_COLUMNS if column in combined.columns]
     uncertainty_csv = output_dir / "af_uncertainty_summary.csv"
     summarize_uncertainty_table(combined, uncertainty_columns).to_csv(uncertainty_csv, index=False)
@@ -175,6 +204,8 @@ def run_experimental_analysis(
         "stock_diameter_mm": f"{stock_diameter_mm:.6g}",
         "stock_diameter_in": f"{stock_diameter_mm / 25.4:.6g}",
     }
+    if run_rex_kinetics:
+        outputs["recrystallization_kinetics_summary"] = str(rex_kinetics_csv)
 
     if experimental_microstructure_path:
         outputs.update(
@@ -236,6 +267,19 @@ def run_experimental_analysis(
     elif local_temperature_history_csv and not pyjmak_material_input_file:
         outputs["local_pyjmak_warning"] = "local_temperature_history_csv was provided, but pyjmak_material_input_file was not provided."
 
+    if local_thermomechanical_history_csv:
+        try:
+            local_rex_csv = output_dir / "local_rex_kinetics_summary.csv"
+            run_rex_kinetics_on_local_histories(
+                local_history_csv=local_thermomechanical_history_csv,
+                output_csv=local_rex_csv,
+                initial_grain_size_um=initial_grain_size_um,
+                interpass_time_s=rex_interpass_time_s,
+            )
+            outputs["local_rex_kinetics_summary"] = str(local_rex_csv)
+        except Exception as exc:
+            outputs["local_rex_kinetics_warning"] = str(exc)
+
     config_json = output_dir / "experimental_analysis_config.json"
     config_json.write_text(json.dumps(dataclass_to_dict(config), indent=2), encoding="utf-8")
     outputs["config_json"] = str(config_json)
@@ -264,6 +308,10 @@ def main() -> None:
     parser.add_argument("--pyjmak-inter-hit-gap-s", type=float, default=0.0, help="Optional time gap inserted between AF hits in pyJMAK temperature history.")
     parser.add_argument("--local-temperature-history-csv", default=None, help="Optional local/nodal workpiece thermal-history CSV for pointwise pyJMAK predictions.")
     parser.add_argument("--local-pyjmak-max-locations", type=int, default=None, help="Optional limit on local pyJMAK locations for testing large exports.")
+    parser.add_argument("--run-rex-kinetics", action="store_true", help="Run mixed DRX/MDRX/SRX kinetics on processed AF stress-strain curves.")
+    parser.add_argument("--rex-interpass-time-s", type=float, default=1.0, help="Time after each hit used for SRX/MDRX kinetics.")
+    parser.add_argument("--initial-grain-size-um", type=float, default=26.3, help="Initial/supplier grain size for mixed REX kinetics.")
+    parser.add_argument("--local-thermomechanical-history-csv", default=None, help="Optional local/nodal CSV with temperature and strain history for local DRX/MDRX/SRX predictions.")
     parser.add_argument("--hit-glob", default="*.csv", help="Glob pattern for AF hit files.")
     parser.add_argument(
         "--stock-diameter-mm",
@@ -290,6 +338,10 @@ def main() -> None:
         pyjmak_inter_hit_gap_s=args.pyjmak_inter_hit_gap_s,
         local_temperature_history_csv=args.local_temperature_history_csv,
         local_pyjmak_max_locations=args.local_pyjmak_max_locations,
+        run_rex_kinetics=args.run_rex_kinetics,
+        rex_interpass_time_s=args.rex_interpass_time_s,
+        initial_grain_size_um=args.initial_grain_size_um,
+        local_thermomechanical_history_csv=args.local_thermomechanical_history_csv,
         hit_glob=args.hit_glob,
         stock_diameter_mm=args.stock_diameter_mm,
         initial_height_mm=args.initial_height_mm,
