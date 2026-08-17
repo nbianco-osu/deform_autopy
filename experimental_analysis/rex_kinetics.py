@@ -63,6 +63,7 @@ class SRXKineticsParameters:
     srx_grain_initial_exponent: float = 0.4
     srx_grain_strain_exponent: float = 0.5
     srx_grain_activation_energy_j_mol: float = 45000.0
+    min_rex_grain_um: float = 1.0
 
 
 @dataclass
@@ -222,7 +223,7 @@ def static_recrystallization_fraction(
     return {
         "srx_t05_s": float(t05),
         "srx_fraction": fraction,
-        "srx_rex_grain_um": max(1e-9, float(grain_um)),
+        "srx_rex_grain_um": max(float(params.min_rex_grain_um), float(grain_um)),
     }
 
 

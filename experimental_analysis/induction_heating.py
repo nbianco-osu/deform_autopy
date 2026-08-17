@@ -781,7 +781,18 @@ def save_heat_events_plot(
         return output_png
 
     values = pd.to_numeric(heat_events["delta_temp_c"], errors="coerce").to_numpy(dtype=float)
-    y_bounds = (0.0, max(float(np.nanmax(values)) * 1.15, 1.0))
+    finite_values = values[np.isfinite(values)]
+    if len(finite_values) == 0:
+        y_bounds = (0.0, 1.0)
+    else:
+        low = min(0.0, float(np.nanmin(finite_values)))
+        high = max(0.0, float(np.nanmax(finite_values)))
+        if low == high:
+            low -= 1.0
+            high += 1.0
+        pad = 0.12 * (high - low)
+        y_bounds = (low - pad, high + pad)
+    zero_y = bottom - (0.0 - y_bounds[0]) / max(y_bounds[1] - y_bounds[0], 1e-9) * (bottom - top)
     for step in range(6):
         fraction = step / 5.0
         gy = int(bottom - fraction * (bottom - top))
@@ -796,10 +807,13 @@ def save_heat_events_plot(
     for index, (_, event) in enumerate(heat_events.iterrows()):
         value = float(event["delta_temp_c"])
         x_center = left + slot * (index + 0.5)
-        y_top = bottom - (value - y_bounds[0]) / (y_bounds[1] - y_bounds[0]) * (bottom - top)
+        y_value = bottom - (value - y_bounds[0]) / max(y_bounds[1] - y_bounds[0], 1e-9) * (bottom - top)
         color = COLOR_HEAT if event["event_type"] == "reheat" else COLOR_TEMP
-        draw.rectangle((x_center - bar_width / 2, y_top, x_center + bar_width / 2, bottom), fill=color)
-        draw.text((x_center - 20, y_top - 24), f"{value:.0f}", fill=COLOR_TEXT, font=small_font)
+        y0 = min(y_value, zero_y)
+        y1 = max(y_value, zero_y)
+        draw.rectangle((x_center - bar_width / 2, y0, x_center + bar_width / 2, y1), fill=color)
+        label_y = y0 - 24 if value >= 0 else y1 + 4
+        draw.text((x_center - 20, label_y), f"{value:.0f}", fill=COLOR_TEXT, font=small_font)
         label = f"H{event['after_hit']}"
         draw.text((x_center - 18, bottom + 12), label, fill=COLOR_TEXT, font=small_font)
 

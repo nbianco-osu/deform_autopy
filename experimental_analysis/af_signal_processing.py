@@ -83,7 +83,11 @@ def read_af_hit_csv(csv_path: str | Path, column_map: AFColumnMap | None = None)
 
 def infer_hit_number(filename: str) -> int | None:
     """Infer hit number from a filename, returning None when no number is found."""
-    matches = re.findall(r"(?:hit|h)[ _-]*(\d+)|(?:^|[_-])(\d+)(?:[_-]|$)", filename, flags=re.I)
+    matches = re.findall(
+        r"(?:hit(?:point)?|hit\s*point|h)[ _-]*(\d+)|(?:^|[_-])(\d+)(?:[_-]|$)",
+        filename,
+        flags=re.I,
+    )
     numbers = [int(item) for match in matches for item in match if item != ""]
     return numbers[-1] if numbers else None
 
