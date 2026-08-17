@@ -48,6 +48,12 @@ research loop.
   - Flags hits outside the selected AF process window.
   - Writes an induction-heating schedule plot and CSV event table.
 
+- `experimental_analysis/hit_map_3d.py`
+  - Maps raw AF hit coordinates onto a cylindrical workpiece.
+  - Uses the butt-reference axial position and `A` angle to place hits on the
+    stock surface.
+  - Writes a hit-coordinate CSV, static PNG, and interactive HTML map.
+
 - `experimental_analysis/microstructure_evolution.py`
   - Couples the reconstructed temperature history with hit-level deformation.
   - Evaluates DRX at each hit and SRX/MDRX during interpass thermal intervals.
@@ -96,8 +102,21 @@ research loop.
   - Stores literature-backed 316L phase-stability, hot-deformation, and
     grain-growth priors with source links.
 
+- `experimental_analysis/material_data/4140_literature_parameters.json`
+  - Stores literature-backed 4140 phase-transformation, hot-deformation, and
+    grain-growth priors with source links.
+
 - `experimental_analysis/material_data/pyjmak_316L_stable_austenite_nist.inp`
   - NIST-backed stable-austenite pyJMAK material input for already-solid 316L.
+
+- `experimental_analysis/material_data/pyjmak_4140_austenite_transformations_prior.inp`
+  - Generic steel pyJMAK phase-transformation prior registered for 4140 until
+    4140-specific CCT/TTT tables are calibrated.
+
+- `experimental_analysis/material_parameters.py`
+  - Parses AF folders named `{object_name}_{diameter}in_{material}`.
+  - Selects material-specific pyJMAK input files and DRX/SRX/MDRX priors for
+    `316L` and `4140`.
 
 - `experimental_analysis/fusion.py`
   - Provides conservative fusion strategies: hit-level joining, nearest spatial
@@ -109,6 +128,19 @@ research loop.
 - `model_microstructure_evolution.py`
   - Convenience wrapper for running the Box_1in thermal-deformation
     microstructure evolution workflow.
+
+- `create_hit_map_3d.py`
+  - Convenience wrapper for generating the Box_1in_316L 3D hit map.
+
+- `analyze_all_temperature_histories.py`
+  - Batch-runs induction temperature-history analysis for every AF dataset
+    folder matching `{object_name}_{diameter}in_{material}`.
+
+- `analyze_all_microstructure.py`
+  - Batch-runs material-specific DRX/SRX/MDRX microstructure evolution for
+    every AF dataset folder matching `{object_name}_{diameter}in_{material}`.
+  - Generates missing stress-strain curves when needed and reuses/generated
+    induction histories.
 
 ## Scientifically Defensible Starting Strategy
 
@@ -183,10 +215,24 @@ If `stock_diameter_mm` is omitted, the pipeline tries to infer the diameter from
 the AF data folder name. Examples:
 
 - `Box_1in` -> `25.4 mm`
+- `Box_1in_316L` -> `25.4 mm`, material `316L`
+- `Box_1in_4140` -> `25.4 mm`, material `4140`
+- `Cylinder_1in_4140` -> `25.4 mm`, material `4140`
 - `Box_0.625in` -> `15.875 mm`
 - `Box_5_8in` -> `15.875 mm`
 
 You can still pass `stock_diameter_mm=...` to override this.
+
+The preferred folder convention is:
+
+```text
+{object_name}_{diameter}in_{material}
+```
+
+When the folder follows that convention, the pipeline records `object_name`,
+`material`, `stock_diameter_mm`, the material-prior JSON path, and the default
+pyJMAK material input file. Pass `--material 316L` or `--material 4140` only if
+you need to override the folder-derived material.
 
 ## Optional pyJMAK Integration
 
@@ -211,6 +257,15 @@ result = run_experimental_analysis(
     pyjmak_material_input_file=r"C:\path\to\abq_phase_trans_input-Steel.inp",
     pyjmak_source_path=r"C:\path\to\pyJMAK",
 )
+```
+
+To use the registered material file inferred from the folder name, pass `auto`:
+
+```powershell
+python experimental_analysis_pipeline.py `
+  --raw-af-data-dir "C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in_4140" `
+  --output-dir "C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in_4140\experimental_analysis_output" `
+  --pyjmak-material-input-file auto
 ```
 
 The pipeline writes:
@@ -246,6 +301,28 @@ C:\Users\nbian\Documents\DEFORM API\experimental_analysis\material_data\316L_lit
 
 Use that JSON as a transparent place to track values gathered from literature
 before fitting AF-specific model parameters.
+
+### 4140 Interpretation
+
+The codebase now includes a 4140 starting-prior file:
+
+```text
+C:\Users\nbian\Documents\DEFORM API\experimental_analysis\material_data\4140_literature_parameters.json
+```
+
+and a registered pyJMAK transformation-prior file:
+
+```text
+C:\Users\nbian\Documents\DEFORM API\experimental_analysis\material_data\pyjmak_4140_austenite_transformations_prior.inp
+```
+
+The 4140 microstructure priors use AISI 4140 hot-deformation literature for DRX
+activation/fraction trends and an AISI 4140 austenite grain-growth model form.
+The pyJMAK file is currently a generic steel transformation prior registered
+for 4140 so that Austenite/Ferrite/Pearlite/Bainite/Martensite predictions can
+be exercised. Replace or calibrate the TTT/JMAK coefficients with 4140-specific
+CCT/TTT, dilatometry, hardness, and metallography data before treating phase
+fractions as final quantitative predictions.
 
 ### Local Workpiece pyJMAK Predictions
 
@@ -493,6 +570,19 @@ Treat these predictions as a screening model until the kinetics are calibrated
 against measured microstructure and/or DEFORM JMAK fields. The current
 coefficients are transparent starting priors, not final 316L AF calibration
 constants.
+
+To run the same microstructure analysis across all AF datasets:
+
+```powershell
+python analyze_all_microstructure.py
+```
+
+The script writes per-dataset outputs to
+`experimental_analysis_output/microstructure_evolution_batch` and combined
+outputs to `C:\Users\nbian\Desktop\OSU Research\AF Data\microstructure_batch_summary`.
+The current 4140 prior is intentionally bounded with a minimum SRX
+recrystallized grain size of `1 um`, but it still trends aggressively toward
+fine grain sizes and should be calibrated with measured 4140 microstructure.
 
 ## Calibration Workflow
 

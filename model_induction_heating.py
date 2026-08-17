@@ -17,8 +17,8 @@ from experimental_analysis.induction_heating import (
 )
 
 
-DEFAULT_RAW_AF_DATA_DIR = r"C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in"
-DEFAULT_OUTPUT_DIR = r"C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in\experimental_analysis_output\induction_heating"
+DEFAULT_RAW_AF_DATA_DIR = r"C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in_316L"
+DEFAULT_OUTPUT_DIR = r"C:\Users\nbian\Desktop\OSU Research\AF Data\Box_1in_316L\experimental_analysis_output\induction_heating"
 
 
 def run_default_box_analysis() -> dict[str, str]:

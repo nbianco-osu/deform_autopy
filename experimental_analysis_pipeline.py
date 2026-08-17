@@ -30,6 +30,14 @@ from experimental_analysis.af_signal_processing import process_af_folder
 from experimental_analysis.calibration import run_default_calibration
 from experimental_analysis.fusion import add_target_errors, load_table
 from experimental_analysis.local_pyjmak_workpiece import run_pyjmak_for_local_histories
+from experimental_analysis.material_parameters import (
+    material_context_from_folder,
+    material_prior_path as get_material_prior_path,
+    normalize_material_label,
+    pyjmak_material_input_file as get_pyjmak_material_input_file,
+    rex_parameters_for_material,
+    try_parse_af_dataset_folder,
+)
 from experimental_analysis.microstructure_import import write_microstructure_import_outputs
 from experimental_analysis.microstructure_targets import load_targets_csv
 from experimental_analysis.pyjmak_adapter import run_pyjmak_from_curve_folder
@@ -68,6 +76,10 @@ def infer_stock_diameter_mm_from_path(path: str | Path, fallback_mm: float = 15.
     Recognized examples include `Box_1in`, `0.625in`, `5_8in`, and `5-8in`.
     If no diameter tag is found, the historical 5/8 inch fallback is used.
     """
+    metadata = try_parse_af_dataset_folder(path)
+    if metadata:
+        return metadata.diameter_mm
+
     text = " ".join(Path(path).parts).lower()
 
     fraction_match = re.search(r"(?<!\d)(\d+)[_-](\d+)\s*in(?:ch|ches)?\b", text)
@@ -103,6 +115,8 @@ def run_experimental_analysis(
     run_rex_kinetics: bool = False,
     rex_interpass_time_s: float = 1.0,
     initial_grain_size_um: float = 26.3,
+    material: str | None = None,
+    use_material_defaults: bool = True,
     local_thermomechanical_history_csv: str | Path | None = None,
     hit_glob: str = "*.csv",
     stock_diameter_mm: float | None = None,
@@ -114,10 +128,22 @@ def run_experimental_analysis(
 ) -> dict[str, str]:
     """Run AF experimental processing and optional DEFORM/target fusion."""
     raw_af_data_dir = Path(raw_af_data_dir)
+    dataset_metadata = try_parse_af_dataset_folder(raw_af_data_dir)
+    inferred_material = dataset_metadata.material if dataset_metadata else None
+    material = normalize_material_label(material or inferred_material)
     inferred_stock_diameter_mm = infer_stock_diameter_mm_from_path(raw_af_data_dir)
     stock_diameter_mm = float(stock_diameter_mm) if stock_diameter_mm is not None else inferred_stock_diameter_mm
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    rex_params = None
+    if use_material_defaults and material != "UNKNOWN":
+        rex_params = rex_parameters_for_material(
+            material=material,
+            initial_grain_size_um=initial_grain_size_um,
+            interpass_time_s=rex_interpass_time_s,
+        )
+        if str(pyjmak_material_input_file).lower() == "auto":
+            pyjmak_material_input_file = str(get_pyjmak_material_input_file(material))
 
     config = PipelineConfig(
         raw_af_data_dir=raw_af_data_dir,
@@ -156,6 +182,7 @@ def run_experimental_analysis(
             output_csv=rex_kinetics_csv,
             initial_grain_size_um=initial_grain_size_um,
             interpass_time_s=rex_interpass_time_s,
+            params=rex_params,
         )
 
     hit_validation = validate_hit_summary(summary_df)
@@ -203,7 +230,22 @@ def run_experimental_analysis(
         "curve_count": str(len(curve_paths)),
         "stock_diameter_mm": f"{stock_diameter_mm:.6g}",
         "stock_diameter_in": f"{stock_diameter_mm / 25.4:.6g}",
+        "material": material,
     }
+    if dataset_metadata:
+        outputs["object_name"] = dataset_metadata.object_name
+        outputs["dataset_folder_name"] = dataset_metadata.folder_name
+    if use_material_defaults and material != "UNKNOWN":
+        material_context = material_context_from_folder(
+            raw_af_data_dir,
+            initial_grain_size_um=initial_grain_size_um,
+            interpass_time_s=rex_interpass_time_s,
+        ) if dataset_metadata else {
+            "material_prior_json": str(get_material_prior_path(material)),
+            "pyjmak_material_input_file": str(get_pyjmak_material_input_file(material)),
+        }
+        outputs["material_prior_json"] = str(material_context["material_prior_json"])
+        outputs["default_pyjmak_material_input_file"] = str(material_context["pyjmak_material_input_file"])
     if run_rex_kinetics:
         outputs["recrystallization_kinetics_summary"] = str(rex_kinetics_csv)
 
@@ -275,6 +317,7 @@ def run_experimental_analysis(
                 output_csv=local_rex_csv,
                 initial_grain_size_um=initial_grain_size_um,
                 interpass_time_s=rex_interpass_time_s,
+                params=rex_params,
             )
             outputs["local_rex_kinetics_summary"] = str(local_rex_csv)
         except Exception as exc:
@@ -311,6 +354,8 @@ def main() -> None:
     parser.add_argument("--run-rex-kinetics", action="store_true", help="Run mixed DRX/MDRX/SRX kinetics on processed AF stress-strain curves.")
     parser.add_argument("--rex-interpass-time-s", type=float, default=1.0, help="Time after each hit used for SRX/MDRX kinetics.")
     parser.add_argument("--initial-grain-size-um", type=float, default=26.3, help="Initial/supplier grain size for mixed REX kinetics.")
+    parser.add_argument("--material", default=None, help="Optional material override, e.g. 316L or 4140. If omitted, inferred from folder name.")
+    parser.add_argument("--no-material-defaults", action="store_true", help="Do not auto-select material-specific REX or pyJMAK defaults.")
     parser.add_argument("--local-thermomechanical-history-csv", default=None, help="Optional local/nodal CSV with temperature and strain history for local DRX/MDRX/SRX predictions.")
     parser.add_argument("--hit-glob", default="*.csv", help="Glob pattern for AF hit files.")
     parser.add_argument(
@@ -341,6 +386,8 @@ def main() -> None:
         run_rex_kinetics=args.run_rex_kinetics,
         rex_interpass_time_s=args.rex_interpass_time_s,
         initial_grain_size_um=args.initial_grain_size_um,
+        material=args.material,
+        use_material_defaults=not args.no_material_defaults,
         local_thermomechanical_history_csv=args.local_thermomechanical_history_csv,
         hit_glob=args.hit_glob,
         stock_diameter_mm=args.stock_diameter_mm,
