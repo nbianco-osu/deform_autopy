@@ -1,0 +1,116 @@
+{
+  "material": "AISI 4140 alloy steel",
+  "purpose": "Literature-backed starting data for pyJMAK phase transformation and AF microstructure modeling.",
+  "status": "research_prior_not_final_calibration",
+  "phase_stability": {
+    "baseline_assumption": "4140 is treated as a transformable low-alloy steel. During hot forging it is expected to be austenitic above the austenitization range; during cooling/quench, pyJMAK may predict ferrite, pearlite, bainite, and martensite depending on the supplied thermal history.",
+    "solid_phases_for_pyjmak": [
+      {
+        "name": "Austenite",
+        "initial_fraction": 1.0
+      },
+      {
+        "name": "Ferrite",
+        "initial_fraction": 0.0
+      },
+      {
+        "name": "Pearlite",
+        "initial_fraction": 0.0
+      },
+      {
+        "name": "Bainite",
+        "initial_fraction": 0.0
+      },
+      {
+        "name": "Martensite",
+        "initial_fraction": 0.0
+      }
+    ],
+    "austenitization_temperature_c": {
+      "recommended_range": [
+        830.0,
+        870.0
+      ],
+      "source_id": "asm_4140_heat_treating_range",
+      "notes": "Use as a process-level prior for interpreting whether AF thermal histories should be modeled as fully austenitic before cooling."
+    },
+    "martensite_start_temperature_c": {
+      "value": 333.0,
+      "source_id": "pyjmak_generic_steel_example",
+      "notes": "Screening prior from the pyJMAK steel example. Replace with measured or alloy-specific CCT/TTT data when available."
+    },
+    "notes": [
+      "The pyJMAK input file included with this codebase uses generic steel transformation tables as a prior.",
+      "For thesis-level predictions, replace the generic TTT/JMAK coefficients with 4140-specific CCT/TTT data or fit them against dilatometry/hardness/microstructure."
+    ]
+  },
+  "hot_deformation_and_recrystallization_priors": {
+    "drx_activation_energy_kj_per_mol": [
+      {
+        "value": 599.7321,
+        "source_id": "lin_4140_hot_deformation"
+      }
+    ],
+    "critical_strain_model": {
+      "equation": "epsilon_c = 0.16707 * (Z/A)^0.06704, Z/A = strain_rate * exp(Q/(R*T_K)) / 2.44154e25",
+      "implemented_approximation": "The code stores Q and the critical-strain prefactor/exponent directly in the same Zener-Hollomon-style interface used for 316L. This preserves the trend but should be calibrated for exact Lin et al. normalization.",
+      "source_id": "lin_4140_hot_deformation"
+    },
+    "drx_fraction_model": {
+      "equation": "X_DRX = 1 - exp(-[((epsilon - epsilon_c)/epsilon_star)^m])",
+      "epsilon_star": "0.61822 * (Z/A)^0.08207",
+      "avrami_exponent_m": 3.85582,
+      "source_id": "lin_4140_hot_deformation"
+    },
+    "austenite_grain_growth_prior": {
+      "equation": "d_g^m = d_0^m + A * t^n * exp(-Q_gg/(R*T_K))",
+      "source_id": "wang_4140_austenite_grain_growth",
+      "notes": "Use this form for future explicit grain-growth implementation. Current mixed REX code uses simplified SRX recrystallized-grain priors and should be calibrated to measured AF final grain size."
+    },
+    "implemented_mixed_model_defaults": {
+      "code_file": "experimental_analysis/material_parameters.py",
+      "status": "transparent defaults for screening; calibrate before quantitative claims",
+      "drx": {
+        "family": "Lin et al.-style 4140 hot-compression DRX prior mapped into the common Zener-Hollomon Avrami interface",
+        "deformation_activation_energy_j_mol": 599732.1,
+        "critical_strain_prefactor": 0.16707,
+        "critical_strain_z_exponent": 0.06704,
+        "drx_avrami_exponent": 3.85582
+      },
+      "srx": {
+        "family": "Sellars-style SRX screening prior for low-alloy steel",
+        "recrystallization_activation_energy_j_mol": 280000.0,
+        "avrami_exponent": 1.5,
+        "notes": "Placeholder prior until 4140 AF interpass microstructure data are available."
+      },
+      "mdrx": {
+        "family": "MDRX screening prior",
+        "mdrx_activation_energy_j_mol": 220000.0,
+        "avrami_exponent": 0.7,
+        "notes": "Placeholder prior until 4140 AF interpass microstructure data are available."
+      }
+    }
+  },
+  "sources": {
+    "lin_4140_hot_deformation": {
+      "title": "Study on constitutive relation of AISI 4140 steel subject to large strain at elevated temperatures",
+      "url": "https://doi.org/10.1016/j.jmatprotec.2003.10.018",
+      "used_for": "4140 hot-deformation activation energy and DRX critical-strain/fraction equations."
+    },
+    "wang_4140_austenite_grain_growth": {
+      "title": "Austenite Grain Growth Behavior of AISI 4140 Alloy Steel",
+      "url": "https://doi.org/10.1155/2013/762890",
+      "used_for": "4140 austenite grain-growth model form."
+    },
+    "pyjmak_generic_steel_example": {
+      "title": "ORNL pyJMAK generic steel example",
+      "url": "https://github.com/ORNL/pyJMAK",
+      "used_for": "Initial steel phase list and generic TTT/JMAK input syntax pending 4140-specific CCT/TTT calibration."
+    },
+    "asm_4140_heat_treating_range": {
+      "title": "AISI 4140 heat-treating/austenitizing practice",
+      "url": "https://www.asminternational.org/",
+      "used_for": "General austenitization-temperature interpretation prior."
+    }
+  }
+}
